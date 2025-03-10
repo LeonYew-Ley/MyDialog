@@ -1,0 +1,839 @@
+---
+---  Author: 【艾延波】
+---  AuthorID: 【273354】
+---  CreateTime: 【2022-12-26 14:05:00】
+--- 【FSync】
+--- 【panel】
+---
+
+local class = require("middleclass")
+local WBElement = require("mworld/worldBaseElement")
+
+---@class fsync_dff8f6be_e315_4351_9739_3ffa4c55644d : WorldBaseElement
+local FsyncElement = class("fsync_dff8f6be-e315-4351-9739-3ffa4c55644d", WBElement)
+local DOTween = CS.DG.Tweening.DOTween
+-- local cs_coroutine = require("common/cs_coroutine")
+
+---@class DialogPanelState
+local DialogPanelState = {
+    Hidden = 0,
+    Show = 1,
+}
+local PlayerPrefs = CS.UnityEngine.PlayerPrefs
+local DIALOGUE_AI_PITCH = "DialogueAndAIAudioPitch"
+
+local DIALOGUE_AI_TRANSLATE = "DialogueAndAITranslate"
+---@param worldElement CS.Tal.framesync.WorldElement
+function FsyncElement:initialize(worldElement)
+    FsyncElement.super.initialize(self, worldElement)
+    self.VisElement.gameObject:SetActive(false)
+    ---@type CommonService
+    self.commonService = App:GetService("CommonService")
+    --订阅KEY消息
+    self:SetUpData()
+    self.hasSetUpUI = false
+    self.isShowToast = false
+    -- 功能是否可用
+    self.canUse = false
+    self.pluginJson = App.Info.plugins
+
+    if self.pluginJson ~= nil and type(self.pluginJson) == "string" then
+        self:initPluginInfo()
+    end
+    self:RegisterHanlder()
+end
+
+function FsyncElement:initPluginInfo()
+    self.versionNumber = App.Info.appVersionNumber -- 获取版本号
+    local list = CourseEnv.ServicesManager:GetJsonService():decode(self.pluginJson)
+    for i, v in ipairs(list) do
+        if v.pluginName == "英语课对话卡慢速开关" then
+            self.canUse = v.pluginVal.open
+            break
+        end
+    end
+    g_LogColorMsg("英语课纠音对话卡慢速功能-canUse->" .. (self.canUse and 1 or 0))
+end
+
+function FsyncElement:Exit()
+    self:ResetData()
+
+    FsyncElement.super.Exit(self)
+end
+
+---@public 初始化数据
+function FsyncElement:SetUpData()
+    self.uniId = tostring(self.VisElement.gameObject.transform.parent.gameObject:GetInstanceID())
+    if not self.uniId then
+        g_Log("forping.选项对话.Panel:找不到uniId")
+    end
+end
+---@type CS.UnityEngine.AudioSource
+---@public 初始化UI
+function FsyncElement:SetUpUI()
+    if self.hasSetUpUI then
+        return
+    end
+    self.hasSetUpUI = true
+
+    self.UI = App:GetService("CommonService").DialogPanel
+    if not self.UI then
+        g_Log("forping.Dialog.Panel:创建UI")
+        local configService = CourseEnv.ServicesManager:GetConfigService()
+        local jsonService = CourseEnv.ServicesManager.GetJsonService()
+
+        local modelStr = configService:GetConfigValueByConfigKey(self.VisElement,"modelContent")
+    
+        local modelTable = {}
+
+        if modelStr and modelStr ~= "" then
+            modelTable = jsonService:decode(modelStr)
+        end
+
+        local panelAddress = modelTable.uAddress
+
+        if panelAddress or panelAddress ~= "" then
+            local panel = CourseEnv.ServicesManager:GetAssetService():GetConfigGameObjectWithUAddress(self.VisElement,panelAddress)
+            self.UI = CS.UnityEngine.GameObject.Instantiate(panel)
+            App:GetService("CommonService").DialogPanel = self.UI
+        else
+            g_Log("forping.Dialog.Panel:找不到UI")
+            return
+        end
+    end
+
+    local panel = self.UI.transform
+    -- Canvas
+    self.rootCanvas = panel.gameObject:GetComponent(typeof(CS.UnityEngine.Canvas))
+    
+    self.rootCanvas.sortingOrder = 100
+    -- 内容
+    local contentTransform = panel:Find("back/content")
+
+    -- content
+    self.textContentTransform = contentTransform:Find("content")
+
+    -- icon 
+    self.iconView = contentTransform:Find("icon").gameObject
+    self.nanRoleView = contentTransform:Find("nanRole").gameObject
+    self.nvRoleView = contentTransform:Find("nvRole").gameObject
+    -- 名字 和 内容
+    self.nameView = self.textContentTransform:Find("topleft/name/Text").gameObject
+    self.textView = self.textContentTransform:Find("content/text").gameObject
+    self.contentImageView = self.textContentTransform:Find("content/image").gameObject
+    -- 点击继续
+    self.goonButtonView = self.textContentTransform:Find("goon").gameObject 
+    -- 音频
+    local audioViewGO = panel:Find("other/audio").gameObject
+
+    ---@type CS.UnityEngine.AudioSource
+    self.audioSource = audioViewGO:GetComponent(typeof(CS.UnityEngine.AudioSource))
+    ---@type CS.UnityEngine.Audio.AudioMixer    
+    ---@type CS.UnityEngine.Audio.AudioMixerGroup
+    self.AudioMixer = self.audioSource.outputAudioMixerGroup.audioMixer
+    -- 显示的组件    
+    self.iconImage = self.iconView:GetComponent(typeof(CS.UnityEngine.UI.Image))
+    self.text = self.textView:GetComponent(typeof(CS.UnityEngine.UI.Text))
+    self.nameText = self.nameView:GetComponent(typeof(CS.UnityEngine.UI.Text))
+    self.goonText = self.goonButtonView.transform:Find("back/Text").gameObject:GetComponent(typeof(CS.UnityEngine.UI.Text))
+    self.contentImage = self.contentImageView:GetComponent(typeof(CS.UnityEngine.UI.Image))
+    self.goOnButton = self.goonButtonView:GetComponent(typeof(CS.UnityEngine.UI.Button))
+    App:GetService("CommonService"):AddEventListener(self.goOnButton,"onClick",function()
+        if self.state ~= DialogPanelState.Show then
+            return
+        end
+        self:DealGoOnButtonClickAction()
+    end)
+    -- 选项相关的UI
+    ---@type CS.UnityEngine.RectTransform
+    self.optionsTransfrom = panel:Find("back/options")
+    self.optionsScrollRect = self.optionsTransfrom.gameObject:GetComponent(typeof(CS.UnityEngine.UI.ScrollRect))
+    self.optionsContent = self.optionsTransfrom:Find("Viewport/Content")
+    self.optionsMaxHeight = 390
+    self.opstionsItemView = panel:Find("reuse_items/option_item").gameObject
+
+    -- 翻译相关的UI
+    self.fanyiContentView = self.textContentTransform:Find("fanyi").gameObject
+    self.fanyiContentView:SetActive(false)
+    self.fanyiText = self.fanyiContentView.transform:Find("contnet").gameObject:GetComponent(typeof(CS.UnityEngine.UI.Text))
+    self.fanyiButtonsContentView = self.textContentTransform:Find("topleft/options/fanyi_buttons").gameObject
+
+    self.fanyiShowView = self.fanyiButtonsContentView.transform:Find("zhankai").gameObject
+    self.fanyiHiddenView = self.fanyiButtonsContentView.transform:Find("shouqi").gameObject
+    self.fanyiShowButton = self.fanyiShowView:GetComponent(typeof(CS.UnityEngine.UI.Button))
+    self.fanyiHiddenButton = self.fanyiHiddenView:GetComponent(typeof(CS.UnityEngine.UI.Button))
+
+    self.mansuView = self.fanyiButtonsContentView.transform:Find("mansu").gameObject
+    self.cancelMansuView = self.fanyiButtonsContentView.transform:Find("cancelMansu").gameObject
+
+    self.mansuButton = self.mansuView:GetComponent(typeof(CS.UnityEngine.UI.Button)) 
+    self.cancelMansuButton = self.cancelMansuView:GetComponent(typeof(CS.UnityEngine.UI.Button))
+
+    local pitch = PlayerPrefs.GetFloat(DIALOGUE_AI_PITCH, 1)
+    -- 1 展示翻译  0 为不展示翻译
+    self.isTranslate = PlayerPrefs.GetInt(DIALOGUE_AI_TRANSLATE, 0) == 1
+
+    
+    -- if self.isTranslate then
+    --     self.fanyiShowView:SetActive(false)
+    --     self.fanyiHiddenView:SetActive(true)
+    -- else
+    --     self.fanyiShowView:SetActive(true)
+    --     self.fanyiHiddenView:SetActive(false)
+    --     -- self.fanyiContentView:SetActive(false)
+    -- end
+    self.audioSource.pitch = pitch
+    App:GetService("CommonService"):AddEventListener(self.mansuButton,"onClick",function()
+        self.mansuButton.gameObject:SetActive(false)
+        self.cancelMansuButton.gameObject:SetActive(true)
+        self.audioSource.pitch = 0.75
+        self.toast.gameObject:SetActive(true)
+        self.toastText.text = self.slowStyleText
+        self.isShowToast = true 
+        if self.toastCoroutine then
+            self.commonService:StopCoroutineSafely(self.toastCoroutine)
+            self.toastCoroutine = nil
+        end
+        self.toastCoroutine  = self.commonService:StartCoroutine(function()
+            self.commonService:YieldSeconds(2)
+            self.toast.gameObject:SetActive(false)
+            self.isShowToast = false
+        end)
+        PlayerPrefs.SetFloat(DIALOGUE_AI_PITCH, 0.75)
+        PlayerPrefs.Save()
+        self:DealReplayButtonClickAction(0)
+    end)
+    App:GetService("CommonService"):AddEventListener(self.cancelMansuButton,"onClick",function()
+        self.audioSource.pitch = 1
+
+        PlayerPrefs.SetFloat(DIALOGUE_AI_PITCH, 1)
+        PlayerPrefs.Save()
+        if self.isShowToast then
+            self.commonService:StopCoroutineSafely(self.toastCoroutine)
+            self.toastCoroutine = nil
+        end
+        self.toast.gameObject:SetActive(true)
+        self.toastText.text = self.normalStyleText
+        self.toastCoroutine  = self.commonService:StartCoroutine(function()
+            self.commonService:YieldSeconds(2)
+            self.toast.gameObject:SetActive(false)
+            self.isShowToast = false
+        end)
+        self.mansuButton.gameObject:SetActive(true)
+        self.cancelMansuButton.gameObject:SetActive(false)
+    end)
+    App:GetService("CommonService"):AddEventListener(self.fanyiShowButton,"onClick",function()
+        if self.state ~= DialogPanelState.Show then
+            return
+        end
+        self.isTranslate = true
+        PlayerPrefs.SetInt(DIALOGUE_AI_TRANSLATE, 1)
+        PlayerPrefs.Save()
+        self:ShowOrHiddenFanyi(true)
+    end)
+
+   
+    App:GetService("CommonService"):AddEventListener(self.fanyiHiddenButton,"onClick",function()
+        if self.state ~= DialogPanelState.Show then
+            return
+        end
+        self.isTranslate = false
+        PlayerPrefs.SetInt(DIALOGUE_AI_TRANSLATE, 0)
+        PlayerPrefs.Save()
+        self:ShowOrHiddenFanyi(false)
+    end)
+
+    -- 重听
+    self.replayButtonView = self.textContentTransform:Find("topleft/options/fanyi_buttons/replay").gameObject
+    self.replayButton = self.replayButtonView:GetComponent(typeof(CS.UnityEngine.UI.Button))
+    self.replayImage = self.replayButtonView:GetComponent(typeof(CS.UnityEngine.UI.Image))
+    self.replayAnimator = self.replayButtonView:GetComponent(typeof(CS.UnityEngine.Animator))
+    App:GetService("CommonService"):AddEventListener(self.replayButton,"onClick",function()
+        if self.state ~= DialogPanelState.Show then
+            return
+        end
+        self:DealReplayButtonClickAction(0)
+    end)
+
+    self.replayGuideView = self.replayButtonView.transform:Find("guide").gameObject
+    self.replayGuideButton = self.replayGuideView.transform:Find("replayButton").gameObject:GetComponent(typeof(CS.UnityEngine.UI.Button))
+    App:GetService("CommonService"):AddEventListener(self.replayGuideButton,"onClick",function()
+        if self.state ~= DialogPanelState.Show then
+            return
+        end
+        self:DealReplayButtonClickAction(1)
+    end)
+
+    -- 测试相关的
+    self.testView = panel:Find("back/test").gameObject
+    ---@type CS.UnityEngine.RectTransform
+    self.toast = panel:Find("toast"):GetComponent(typeof(CS.UnityEngine.RectTransform))
+    self.toastText = self.toast:Find("Text"):GetComponent(typeof(CS.UnityEngine.UI.Text))
+    self.slowStyleText = "对话语速已切换为慢速～"
+    self.normalStyleText = "对话语速已恢复为正常～"
+    self.toast.gameObject:SetActive(false)
+    self.testGoonButton = self.testView.transform:Find("goon").gameObject:GetComponent(typeof(CS.UnityEngine.UI.Button))
+    App:GetService("CommonService"):AddEventListener(self.testGoonButton,"onClick",function()
+        if self.state ~= DialogPanelState.Show then
+            return
+        end
+        self:DealGoOnButtonClickAction()
+    end)
+
+    if self.canUse then
+        if pitch == 1.0 then
+            self.mansuButton.gameObject:SetActive(true)
+            self.cancelMansuButton.gameObject:SetActive(false)
+        elseif pitch == 0.75 then
+            self.mansuButton.gameObject:SetActive(false)
+            self.cancelMansuView:SetActive(true)
+
+        end
+    else
+        self.mansuButton.gameObject:SetActive(false)
+        self.cancelMansuView:SetActive(false)
+        self.audioSource.pitch = 1
+        PlayerPrefs.SetFloat(DIALOGUE_AI_PITCH, 1)
+        PlayerPrefs.Save()
+    end
+end
+------------------------按钮事件消息---------------------------------------------
+---@public 处理当前对话播放完毕
+function FsyncElement:DealGoOnButtonClickAction()
+    local observerService = CourseEnv.ServicesManager:GetObserverService()
+    observerService:Fire("Dialog.Panel.ClickGoOnButton"..self.uniId)
+end
+
+---@public 处理当前对话播放完毕
+---@param type number 0 重听 1 重听引导
+function FsyncElement:DealReplayButtonClickAction(type)
+    g_Log("forping.Dialog.Panel.DealReplayButtonClickAction: ", tostring(type))
+    local observerService = CourseEnv.ServicesManager:GetObserverService()
+    observerService:Fire("Dialog.Panel.ClickReplayButton"..self.uniId,type)
+end
+
+--- @public 展示或隐藏翻译
+function FsyncElement:ShowOrHiddenFanyi(show)
+    if show then
+        self.text.text = self.translateText
+        self.fanyiShowView:SetActive(false)
+        self.fanyiHiddenView:SetActive(true)
+    else
+        self.text.text = self.sourceText
+        self.fanyiShowView:SetActive(true)
+        self.fanyiHiddenView:SetActive(false)
+    end
+end
+
+------------------------展示对话相关的---------------------------------------------
+function FsyncElement:ResetData()
+
+    if self.seqEntryAnim then
+        self.seqEntryAnim:Kill()
+    end
+    if self.countDownCoroutine then
+        self.commonService:StopCoroutineSafely(self.countDownCoroutine)
+        -- cs_coroutine.stop(self.countDownCoroutine) 
+        self.countDownCoroutine = nil
+    end
+end
+
+---@public 重置ui
+function FsyncElement:ResetUIState(uiState)
+    self.state = uiState
+    self:SetUpUI()
+    if not self.UI then
+        return
+    end
+
+    self.UI.transform:SetParent(self.VisElement.gameObject.transform)
+
+    if uiState == DialogPanelState.Hidden then
+        self.VisElement.gameObject:SetActive(false)
+    elseif self.state == DialogPanelState.Show then
+        -- body
+        self.VisElement.gameObject:SetActive(true)
+        
+        if App.isComponentTesting then
+            self.testView:SetActive(true);
+        else
+            self.testView:SetActive(false);
+        end
+    end
+    --self:ShowOrHiddenFanyi(false)
+    self.goonButtonView:SetActive(false)
+    if self.isShowToast then
+        self.commonService:StopCoroutineSafely(self.toastCoroutine)
+        self.toastCoroutine = nil
+        self.isShowToast = false
+        self.toast.gameObject:SetActive(false)
+    end
+    self.optionsTransfrom.gameObject:SetActive(false)
+    self.replayGuideView:SetActive(false)
+    self.isTranslate = PlayerPrefs.GetInt(DIALOGUE_AI_TRANSLATE, 0) == 1
+end
+
+---@public 展示对话 
+function FsyncElement:ShowSpeek(data)
+
+    self:ResetData()
+    self:ResetUIState(DialogPanelState.Show)
+
+    if not self.UI then
+        return
+    end
+
+    self.nameText.text = data.name or ""
+    
+    local assetService = CourseEnv.ServicesManager:GetAssetService()
+    
+    self.nanRoleView:SetActive(false)
+    self.nvRoleView:SetActive(false)
+    self.iconView:SetActive(false)
+
+    -- icon
+    if data.isStudent then
+        self.textContentTransform:SetInsetAndSizeFromParentEdge(CS.UnityEngine.RectTransform.Edge.Left,488,842)
+        local gender = App.Properties.Gender
+        if gender == "male" then -- 男
+            self.nanRoleView:SetActive(true)
+        else
+            self.nvRoleView:SetActive(true)
+        end
+    else
+        local hasIcon = false
+        
+        if data.icon then
+            local imageGO = assetService:GetConfigGameObjectWithUAddress(data.Script,data.icon)
+            if imageGO then
+                local tex = assetService:GetSprite(imageGO)
+                if tex then
+                    hasIcon = true
+                    self.iconImage.sprite = tex
+                end
+            end
+        end
+        if hasIcon then
+            self.textContentTransform:SetInsetAndSizeFromParentEdge(CS.UnityEngine.RectTransform.Edge.Left,488,842)
+            self.iconView:SetActive(true)
+        else
+            self.textContentTransform:SetInsetAndSizeFromParentEdge(CS.UnityEngine.RectTransform.Edge.Left,336,994)
+            self.iconImage.sprite = nil
+        end
+    end
+
+    self.fanyiButtonsContentView:SetActive(true)
+    --- 这个是对话框文本
+    self.text.text = data.text or ""
+    self.sourceText = self.text.text
+    self.translateText = self.sourceText
+    local hasImageContent = false
+
+
+    -- 图片内容
+    if data.imageContent and data.imageContent ~= "" then
+        local imageGO = assetService:GetConfigGameObjectWithUAddress(data.Script,data.imageContent)
+        if imageGO then
+            local tex = assetService:GetSprite(imageGO)
+            if tex then
+                hasImageContent = true
+                self.contentImage.sprite = tex
+            end
+        end
+    end
+
+    if hasImageContent then
+        self.contentImageView:SetActive(true)
+    else
+        self.contentImageView:SetActive(false)
+        self.contentImage.sprite = nil
+    end
+
+    -- 翻译
+    if data.fanyiText then
+        self.translateText  = self.text.text.."\n"..data.fanyiText
+    end
+    if data.hasFanyi == false then
+        -- self.fanyiShowView = self.fanyiButtonsContentView.transform:Find("zhankai").gameObject
+        -- self.fanyiHiddenView = self.fanyiButtonsContentView.transform:Find("shouqi").gameObject
+        self.fanyiShowView:SetActive(false)
+        self.fanyiHiddenView:SetActive(false)
+    else
+        if self.isTranslate then 
+            self.text.text = self.translateText
+            self.fanyiHiddenView:SetActive(true)
+            self.fanyiShowView:SetActive(false)
+        else
+            self.fanyiShowView:SetActive(true)
+            self.fanyiHiddenView:SetActive(false)
+        end
+    end
+    -- 重听
+    if data.showReplay then
+        self.replayButtonView:SetActive(true)
+        self.replayImage.enabled = true
+        self.replayButton.enabled = true
+        self:ChangeReplayButtonState("Disabled")
+    else
+        self.replayButtonView:SetActive(false)
+    end
+
+end
+---@public 停止对话
+function FsyncElement:HiddenSpeek()
+    self:ResetData()
+    self:ResetUIState(DialogPanelState.Hidden)
+end
+
+---@public 展示选项
+function FsyncElement:ShowOpstions(options, hasVideo)
+    g_Log("forping.对话.Panel:ShowOpstions ".. table.dump(options))
+    if not self.UI then
+        return
+    end
+    if hasVideo then
+        self.optionsTransfrom:SetInsetAndSizeFromParentEdge(CS.UnityEngine.RectTransform.Edge.Right,390,self.optionsTransfrom.rect.width)
+    else
+        self.optionsTransfrom:SetInsetAndSizeFromParentEdge(CS.UnityEngine.RectTransform.Edge.Right,78,self.optionsTransfrom.rect.width)
+    end
+
+    for i = 0, self.optionsContent.childCount - 1, 1 do
+        CS.UnityEngine.GameObject.Destroy(self.optionsContent:GetChild(i).gameObject)
+    end
+
+    self.optionsTransfrom.gameObject:SetActive(true)
+    
+    for _,v in ipairs(options) do
+
+        local state = tonumber(v.state) or 1 -- 类型，是否可以点击
+        local dataId = v.id -- 当前的id
+        local text = v.text -- 文本
+
+        local view = CS.UnityEngine.GameObject.Instantiate(self.opstionsItemView)
+        
+        local image = view.transform:Find("left").gameObject
+        local image_disable = view.transform:Find("left_disable").gameObject
+        ---@type CS.UnityEngine.UI.Text
+        local textView = view.transform:Find("text"):GetComponent(typeof(CS.UnityEngine.UI.Text))
+        ---@type CS.UnityEngine.UI.Button
+        local button = view:GetComponent(typeof(CS.UnityEngine.UI.Button))
+        
+        textView.text = text
+        if state == 2 then -- 1 开 2 关
+            button.interactable = false
+            image:SetActive(false)
+            textView.color = CS.UnityEngine.Color(1,1,1,200/255)
+        else
+            button.interactable = true
+            image_disable:SetActive(false)
+            textView.color = CS.UnityEngine.Color(1,1,1,1)
+        end
+
+        App:GetService("CommonService"):AddEventListener(button,"onClick",function()
+            if self.state ~= DialogPanelState.Show then
+                return
+            end
+            CourseEnv.ServicesManager:GetObserverService():Fire("Dialog.Panel.ClickOption"..self.uniId,{id = dataId})
+        end)
+        view.transform:SetParent(self.optionsContent)
+        view.transform.localScale = Vector3(1.0,1.0,1.0)
+    end
+    self.commonService:StartCoroutine(function()
+        self.commonService:YieldEndFrame()
+        -- coroutine.yield(CS.UnityEngine.WaitForEndOfFrame())
+        local currentHeight = self.optionsContent.rect.height
+        local sizeDelta = self.optionsTransfrom.sizeDelta
+        local newSizeDelta =  Vector2(sizeDelta.x,currentHeight + 4)
+        local needScrollToEnd = false
+        if currentHeight > self.optionsMaxHeight then
+            newSizeDelta.y = self.optionsMaxHeight
+            needScrollToEnd = true
+        end
+
+        self.optionsTransfrom.sizeDelta = newSizeDelta
+        self.commonService:YieldEndFrame()
+        -- coroutine.yield(CS.UnityEngine.WaitForEndOfFrame())
+        self.optionsScrollRect.verticalNormalizedPosition = 0
+    end)
+end
+
+
+function FsyncElement:PlayAudio(clip)
+    g_Log("forping.对话.Panel:PlayAudio: ".. tostring(clip))
+    if self.audioSource then
+        if self.AudioMixer ~=nil then
+            self.AudioMixer:SetFloat("PitchShifter_Pitsh",1/self.audioSource.pitch)
+        end
+
+        self.audioSource.clip = clip
+       
+        self.audioSource:Play()
+    end
+end 
+
+function FsyncElement:StopAudio()
+    if self.audioSource then
+        self.audioSource:Stop()
+    end
+end
+
+
+
+function FsyncElement:ShowGoonButton(data)
+    if not self.UI then
+        return
+    end
+
+    g_Log("forping.对话.Panel:ShowGoonButton: ".. table.dump(data))
+    self.goonButtonView:SetActive(true)
+    local text = data.goonTitle or "点击继续";
+    local timer = tonumber(data.countDownTimer) or 5
+    -- 处理倒计时
+    if not data.hasCountDown then
+        self.goonText.text = text;
+        return
+    end
+    if self.countDownCoroutine then
+        self.commonService:StopCoroutineSafely(self.countDownCoroutine)
+        -- cs_coroutine.stop(self.countDownCoroutine) 
+        self.countDownCoroutine = nil
+    end
+    self.countDownCoroutine = self.commonService:StartCoroutine(function()
+        self.goonText.text = text.."("..tostring(timer).."s)"
+        while timer > 0 do
+            self.commonService:YieldSeconds(1)
+            -- coroutine.yield(CS.UnityEngine.WaitForSeconds(1))
+            timer = timer - 1
+            self.goonText.text = text.."("..tostring(timer).."s)"
+        end
+        -- 结束
+        self:DealGoOnButtonClickAction()
+    end)
+end
+
+function FsyncElement:ChangeReplayButtonState(state)
+    if not self.UI then
+        return
+    end
+    -- 只要播放音频就将 慢速按钮置灰
+    -- self.fanyiShowButton = self.fanyiShowView:GetComponent(typeof(CS.UnityEngine.UI.Button))
+    -- self.fanyiHiddenButton = self.fanyiHiddenView:GetComponent(typeof(CS.UnityEngine.UI.Button))
+    if state == "Disabled" then
+        self.replayButton.interactable = false
+        self.mansuButton.interactable = false
+        self.cancelMansuButton.interactable = false
+    elseif state == "Selected" then
+        self.replayButton.interactable = true
+        self.mansuButton.interactable = false
+        self.cancelMansuButton.interactable = false
+    else
+        self.replayButton.interactable = true
+        self.mansuButton.interactable = true
+        self.cancelMansuButton.interactable = true
+    end
+    self.replayAnimator:SetTrigger(state)
+end
+
+
+-- 播放重听音效
+function FsyncElement:PlayReplayGuideAudio()
+    if not self.commonService then
+        ---@type CommonService
+       self.commonService = App.GetService("CommonService")
+   end
+    if not self.replayGuideTable then
+
+        local configService = CourseEnv.ServicesManager:GetConfigService()
+        local jsonService = CourseEnv.ServicesManager.GetJsonService()
+
+        local replayGuideStr = configService:GetConfigValueByConfigKey(self.VisElement,"replayGuideAudio")
+
+        self.replayGuideTable = {}
+
+        if replayGuideStr and replayGuideStr ~= "" then
+            self.replayGuideTable = jsonService:decode(replayGuideStr)
+        end
+    end
+
+    local replayGuideAudioAddress = self.replayGuideTable.uAddress
+
+    if replayGuideAudioAddress or replayGuideAudioAddress ~= "" then
+        if self.audioCoroutine then
+            self.commonService:StopCoroutineSafely(self.audioCoroutine)
+            self.audioCoroutine = nil
+            self.audioSource:Stop()
+        end
+        self.replayGuideAudioClip = CourseEnv.ServicesManager:GetAssetService():GetConfigGameObjectWithUAddress(self.VisElement,replayGuideAudioAddress)
+        if self.replayGuideAudioClip then
+            self.audioSource.clip = self.replayGuideAudioClip
+            self.audioSource:Play()
+            local audioLength = self.replayGuideAudioClip.length
+            self.audioCoroutine =  self.commonService:StartCoroutine(function()
+                self.commonService:YieldSeconds(audioLength)
+                CourseEnv.ServicesManager:GetObserverService():Fire("Dialog.Panel.ReplayGuidePlayFinlish"..self.uniId)
+            end)
+        end
+
+    end
+end
+-- 播放重听音效
+function FsyncElement:StopReplayGuideAudio()
+    if self.audioCoroutine then
+        self.commonService:StopCoroutineSafely(self.audioCoroutine)
+        self.audioCoroutine = nil
+        self.audioSource:Stop()
+    end
+    if self.replayGuideAudioClip then
+        self.replayGuideAudioClip = nil
+    end
+end
+
+
+---@public 注册事件监听
+function FsyncElement:RegisterHanlder()
+    -- 演讲状态修改
+    local observerService = CourseEnv.ServicesManager:GetObserverService()
+    
+    observerService:Watch("FirstDialogSpeek.Panel.ShowSpeek"..self.uniId, function(key ,args)
+        local data = args and args[0] and args[0].data
+        if not data then
+            return            
+        end
+        self:ShowSpeek(data)
+
+        local sortingOrder = data.sortingOrder or 300
+        self.rootCanvas.sortingOrder = sortingOrder
+    end)
+    observerService:Watch("Dialog.Panel.HiddenSpeek"..self.uniId, function(key ,args)
+        self:HiddenSpeek()
+    end)
+
+    observerService:Watch("Dialog.Panel.ShowOpstions"..self.uniId, function(key ,args)
+        local data = args and args[0]
+        if not data then
+            return
+        end
+        local hasVideo = args and args[1]
+        self:ShowOpstions(data,hasVideo)
+    end)
+
+
+    observerService:Watch("Dialog.Panel.ShowGoonButton"..self.uniId, function(key ,args)
+        local data = args and args[0]
+        if not data then
+            return
+        end
+        self:ShowGoonButton(data)
+    end)   
+
+    observerService:Watch("Dialog.Panel.PlayAudioClip"..self.uniId, function(key ,args)
+        local clip = args and args[0]
+        if not clip then
+            return
+        end
+        self:PlayAudio(clip)
+    end)  
+    observerService:Watch("Dialog.Panel.StopAudioSource"..self.uniId, function(key ,args)
+
+       self:StopAudio()
+    end) 
+ 
+    -- 
+    observerService:Watch("Dialog.Panel.ChangeReplayButtonState"..self.uniId, function(key ,args)
+
+        local state = args and args[0]
+
+        if not state then
+            return
+        end
+        self:ChangeReplayButtonState(state)
+
+     end) 
+
+     observerService:Watch("Dialog.Panel.ShowReplayGuide"..self.uniId, function(key ,args)
+        self.replayImage.enabled = false
+        self.replayButton.enabled = false
+        self.replayGuideView:SetActive(true)
+
+        self:PlayReplayGuideAudio()
+
+     end) 
+
+     observerService:Watch("Dialog.Panel.ReplayGuideDone"..self.uniId, function(key ,args)
+        self.replayImage.enabled = true
+        self.replayButton.enabled = true
+        self.replayGuideView:SetActive(false)
+        self:StopReplayGuideAudio()
+     end) 
+end
+
+
+
+
+-- 收到/恢复IRC消息
+-- @param key  订阅的消息key
+-- @param value  消息集合体
+-- @param isResume  是否为恢复消息
+function FsyncElement:ReceiveMessage(key, value, isResume)
+    -- TODO:
+end
+
+-- 发送KEY-VALUE 消息 
+-- @param key 自定义/协议key
+-- @param body  table 消息体
+function FsyncElement:SendCustomMessage(key, body)
+    self:SendMessage(key,body)
+end
+
+-- 自己avatar对象创建完成
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:SelfAvatarCreated(avatar)
+
+end
+
+-- 自己avatar对象人物模型加载完成ba
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:SelfAvatarPrefabLoaded(avatar)
+
+end
+
+-- avatar对象创建完成，包含他人和自己
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:AvatarCreated(avatar)
+
+end
+
+------------------------蓝图组件相应方法---------------------------------------------
+--是否是异步恢复如果是需要改成true
+function FsyncElement:LogicMapIsAsyncRecorver()
+    return false
+end
+--开始恢复方法（断线重连的时候用）
+function FsyncElement:LogicMapStartRecover()
+    FsyncElement.super:LogicMapStartRecover()
+    --TODO
+end
+--结束恢复方法 (断线重连的时候用)
+function FsyncElement:LogicMapEndRecover()
+    FsyncElement.super:LogicMapEndRecover(self)
+    --TODO
+end
+--所有的组件恢复完成
+function FsyncElement:LogicMapAllComponentRecoverComplete()
+end
+
+--收到Trigger事件
+function FsyncElement : OnReceiveTriggerEvent(interfaceId)
+end
+--收到GetData事件
+function FsyncElement : OnReceiveGetDataEvent(interfaceId)
+    return nil
+end
+
+------------------------蓝图组件相应方法End---------------------------------------------
+
+
+
+return FsyncElement
+ 
+

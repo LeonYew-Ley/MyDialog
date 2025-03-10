@@ -1,0 +1,389 @@
+---
+---  Author: 【朱翠翠】
+---  AuthorID: 【254357】
+---  CreateTime: 【2022-12-15 18:21:48】
+--- 【FSync】
+--- 【口语对话模版】
+---
+local class = require("middleclass")
+local WBElement = require("mworld/worldBaseElement")
+
+
+---@type CS.UnityEngine.UI.Button
+local Button = CS.UnityEngine.UI.Button
+
+-- 纠音开始
+local DIALOGUE_AI_START = "Dialogue.Ai.Start"
+
+-- 纠音结束
+local DIALOGUE_AI_FINISH = "Dialogue.Ai.Finish"
+
+-- 对话卡开始
+local DIALOGUE_CARD_START = "Dialogue.Card.Start"
+
+-- 对话卡结束
+local DIALOGUE_CARD_FINISH = "Dialogue.Card.Finish"
+
+-- 话筒开始
+local DIALOGUE_Mic_START = "Dialogue.Mic.Start"
+
+-- 话筒结束
+local DIALOGUE_Mic_FINISH = "Dialogue.Mic.Finish"
+
+local TAG = "口语对话模版："
+
+---@class fsync_2c7971f0_39ed_4e61_ae5f_313766d54fc0 : WorldBaseElement
+local FsyncElement = class("fsync_2c7971f0-39ed-4e61-ae5f-313766d54fc0", WBElement)
+
+---@param worldElement CS.Tal.framesync.WorldElement
+function FsyncElement:initialize(worldElement)
+    FsyncElement.super.initialize(self, worldElement)
+
+    self.Fsync_KEY = self.class.name .. App.Uuid
+    self.uniId = tostring(self.VisElement.gameObject:GetInstanceID())
+
+    self.isTriggerStart = false
+
+    self.service_manager = CourseEnv.ServicesManager
+    self.service_observer = self.service_manager:GetObserverService()
+    self.service_config = self.service_manager:GetConfigService()
+    self.service_json = self.service_manager:GetJsonService()
+    self.planId = App.Info.liveId
+
+    -- 订阅KEY消息
+    self:SubscribeMsgKey(self.Fsync_KEY)
+
+    self.startBtn = self.VisElement.gameObject.transform:Find("屏幕画布/开始按钮").gameObject:GetComponent(
+        typeof(Button))
+    self.skipBtn = self.VisElement.gameObject.transform:Find("屏幕画布/跳过按钮").gameObject:GetComponent(
+        typeof(Button))
+    self.startBtn.gameObject:SetActive(false)
+    self.skipBtn.gameObject:SetActive(false)
+    self.VisElement.gameObject:SetActive(false)
+    self.firstInit = true
+    self.aiQuestionIndex = 0
+end
+
+--- 初始化配置项
+function FsyncElement:initConfig(currentIndex)
+    -- 当前正在显示的位置
+    self.currentIndex = currentIndex and currentIndex or 1
+    self.aiQuestionIndex = 0
+    -- 是否需要重来
+    self.isAgain = false
+end
+
+--- 初始化数据
+function FsyncElement:initData()
+    -- 纠音样式
+    self.cp_style = self.service_config:GetConfigValueByConfigKey(self.VisElement, "cp_style")
+
+    -- 对话配置项
+    local dialogueConfig = self.service_config:GetConfigValueByConfigKey(self.VisElement, "EnDialogueList")
+    self.dialogueList = CourseEnv.ServicesManager:GetJsonService():decode(dialogueConfig)
+    self.triggerList = {}
+    if self.dialogueList then
+        for i, v in ipairs(self.dialogueList) do
+            self.triggerList[i] = {
+                --   id = tostring(self.planId) .. v.id,
+                out = "start" .. (i - 1)
+            }
+        end
+    end
+    -- 兜底配置项
+    local fightingConfig = self.service_config:GetConfigValueByConfigKey(self.VisElement, "FightingList")
+    self.fightingList = CourseEnv.ServicesManager:GetJsonService():decode(fightingConfig)
+
+    self.isAward = tonumber(self.service_config:GetConfigValueByConfigKey(self.VisElement, "isAward")) == 0
+    self.questionIds = {}
+    local minIndex = tonumber(self.service_config:GetConfigValueByConfigKey(self.VisElement, "minIndex"))
+    local maxIndex = tonumber(self.service_config:GetConfigValueByConfigKey(self.VisElement, "maxIndex"))
+    if minIndex ~= 0 and maxIndex ~= 0 and maxIndex >= minIndex then
+        for i = minIndex, maxIndex, 1 do
+            table.insert(self.questionIds, tostring(i))
+        end
+    end
+end
+
+--- 开始
+function FsyncElement:onStart(currentIndex)
+    self:Template_Log("开始")
+    self:initConfig(currentIndex)
+    if self.firstInit then
+        self:initData()
+        self:SubscribeInternalMsg()
+        self.firstInit = false
+    end
+
+    if self.dialogueList == nil or #self.dialogueList < 1 then
+        self:Trigger("EnDialoguEnd")
+        return
+    end
+
+    if self.isTriggerStart then
+        self:Trigger("EnDialoguStart")
+    end
+
+    self:onLoop()
+end
+
+--- 订阅内部消息
+function FsyncElement:SubscribeInternalMsg()
+    self.service_observer:Watch(DIALOGUE_AI_FINISH .. self.uniId, function(key, args)
+        self:Template_Log("纠音.对话卡样式结束回调")
+
+        -- 纠音结束返回
+        if args[0].isPass then
+            self.currentIndex = self.currentIndex + 1
+            self:onLoop()
+        else
+            self:onFightingCard()
+        end
+    end)
+
+    self.service_observer:Watch(DIALOGUE_CARD_FINISH .. self.uniId, function(key, args)
+        self:Template_Log("对话卡结束回调")
+
+        -- 对话卡结束返回
+        if args[0].isFinish then
+            if not self.isAgain then
+                self.currentIndex = self.currentIndex + 1
+            end
+
+            self:onLoop()
+        end
+    end)
+
+    self.service_observer:Watch(DIALOGUE_Mic_FINISH .. self.uniId, function(key, args)
+        self:Template_Log("纠音.话筒样式结束回调")
+
+        -- 对话卡结束返回
+        if args[0].isPass then
+            if not self.isAgain then
+                self.currentIndex = self.currentIndex + 1
+            end
+
+            self:onLoop()
+        end
+    end)
+end
+
+function FsyncElement:onLoop()
+    if self.currentIndex > #self.dialogueList then
+        self:onFinish()
+        return
+    end
+
+    self.data = self.dialogueList[self.currentIndex]
+    if not self.isAgain then
+        self.data.fightingName = "Chabao"
+    end
+
+    -- local data = self.service_json:decode(self.data)
+    --   for k, v in pairs(self.data) do
+    --   end
+
+    if self.data.type == "1" then
+        -- if self.isAgain then
+        --     self.data.showText = self.data.evalContent
+        -- end
+        if not self.isAgain then
+            self.aiQuestionIndex = self.aiQuestionIndex + 1
+        end
+        self.data.isAward = self.isAward
+        self.data.isAgain = self.isAgain
+        -- self.data.duration = self.duration
+        if self.questionIds and #self.questionIds >= self.aiQuestionIndex then
+            self.data.questionId = self.questionIds[self.aiQuestionIndex]
+        else
+            g_LogError("纠音对话模板 题号 配置错误 题目：" .. self.data.showText)
+        end
+        if self.cp_style == "0" then
+            -- 纠音.对话卡样式
+            self.service_observer:Fire(DIALOGUE_AI_START .. self.uniId, {
+                data = self.data
+            })
+        else
+            --目前没有人在使用剔除掉了  
+            g_LogError('纠音对话卡话筒样式资源已删除-如需要请使用 纠音话筒组件')
+            -- self.service_observer:Fire(DIALOGUE_Mic_START .. self.uniId, {
+            --     data = self.data
+            -- })
+        end
+    else
+        -- 对话卡
+        self.service_observer:Fire(DIALOGUE_CARD_START .. self.uniId, {
+            data = self.data
+        })
+    end
+    self.isAgain = false
+
+    self.curOutTrigger = self.triggerList[self.currentIndex].out
+
+    local message = {
+        status = true,
+        currentIndex = self.currentIndex
+    }
+    self:SendCustomMessage(self.Fsync_KEY, message)
+    self:Trigger(self.curOutTrigger)
+end
+
+function FsyncElement:onFightingCard()
+    local fightingName = self.data.fightingName
+
+    if fightingName and fightingName ~= "" and self.fightingList and #self.fightingList > 0 then
+        for k, v in pairs(self.fightingList) do
+            if v and v.name == fightingName then
+                self.isAgain = true
+
+                self.data.fightingName = ""
+                -- self.data.duration = v.duration
+                self.service_observer:Fire(DIALOGUE_CARD_START .. self.uniId, {
+                    data = v
+                })
+                return
+            end
+        end
+    else
+        self.currentIndex = self.currentIndex + 1
+
+        self:onLoop()
+    end
+end
+
+--- 结束
+function FsyncElement:onFinish()
+    self:Template_Log("结束")
+
+    self.currentIndex = nil
+    local message = {
+        status = false,
+        currentIndex = self.currentIndex
+    }
+    self:SendCustomMessage(self.Fsync_KEY, message)
+    self:Trigger("EnDialoguEnd")
+    self.VisElement.gameObject:SetActive(false)
+end
+
+--- studio组课便捷使用开始
+function FsyncElement:studioStart(currentIndex)
+    self.startBtn.gameObject:SetActive(true)
+    self.skipBtn.gameObject:SetActive(true)
+
+    self.startBtn.onClick:RemoveAllListeners()
+    App:GetService("CommonService"):AddEventListener(self.startBtn, "onClick", function()
+        self.skipBtn.gameObject:SetActive(false)
+        self.startBtn.gameObject:SetActive(false)
+        self:onStart(currentIndex)
+    end)
+    if not self.InitTest then
+        App:GetService("CommonService"):AddEventListener(self.skipBtn, "onClick", function()
+            self:onFinish()
+        end)
+        self.InitTest = true
+    end
+end
+
+--- 日志上报
+function FsyncElement:Template_Log(var)
+    xpcall(function()
+        g_Log(TAG, var)
+    end, function()
+    end)
+end
+
+-- 收到/恢复IRC消息
+-- @param key  订阅的消息key
+-- @param value  消息集合体
+-- @param isResume  是否为恢复消息
+function FsyncElement:ReceiveMessage(key, value, isResume)
+    if key == self.Fsync_KEY and isResume then
+        local lastMsg = value[#value]
+        local data = self.service_json:decode(lastMsg)
+        if data.status then
+            -- 当前正在显示的位置
+            self.VisElement.gameObject:SetActive(true)
+            if App.IsStudioClient then
+                self:studioStart(data.currentIndex)
+            else
+                self:onStart(data.currentIndex)
+            end
+        end
+    end
+end
+
+-- 发送KEY-VALUE 消息
+-- @param key 自定义/协议key
+-- @param body  table 消息体
+function FsyncElement:SendCustomMessage(key, body)
+    self:SendMessage(key, body, 0)
+end
+
+-- 自己avatar对象创建完成
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:SelfAvatarCreated(avatar)
+end
+
+-- 自己avatar对象人物模型加载完成ba
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:SelfAvatarPrefabLoaded(avatar)
+end
+
+-- avatar对象创建完成，包含他人和自己
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:AvatarCreated(avatar)
+end
+
+------------------------蓝图组件相应方法---------------------------------------------
+-- 是否是异步恢复如果是需要改成true
+function FsyncElement:LogicMapIsAsyncRecorver()
+    return false
+end
+
+-- 开始恢复方法（断线重连的时候用）
+function FsyncElement:LogicMapStartRecover()
+    FsyncElement.super:LogicMapStartRecover()
+    -- TODO
+end
+
+-- 结束恢复方法 (断线重连的时候用)
+function FsyncElement:LogicMapEndRecover()
+    FsyncElement.super:LogicMapEndRecover(self)
+    -- TODO
+end
+
+-- 所有的组件恢复完成
+function FsyncElement:LogicMapAllComponentRecoverComplete()
+end
+
+-- 收到Trigger事件
+function FsyncElement:OnReceiveTriggerEvent(interfaceId)
+    if interfaceId == "StartEnDialogue" then
+        self.isTriggerStart = true
+        local message = {
+            status = true,
+            currentIndex = self.currentIndex
+        }
+        self:SendCustomMessage(self.Fsync_KEY, message)
+        self.VisElement.gameObject:SetActive(true)
+        if App.IsStudioClient then
+            self:studioStart(nil)
+        else
+            self:onStart(nil)
+        end
+    end
+end
+
+-- 收到GetData事件
+function FsyncElement:OnReceiveGetDataEvent(interfaceId)
+    return nil
+end
+
+------------------------蓝图组件相应方法End---------------------------------------------
+
+-- 脚本释放
+function FsyncElement:Exit()
+    FsyncElement.super.Exit(self)
+end
+
+return FsyncElement

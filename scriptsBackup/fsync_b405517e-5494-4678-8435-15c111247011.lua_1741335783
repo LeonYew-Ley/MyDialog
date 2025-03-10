@@ -1,0 +1,1882 @@
+---
+---  Author: 【朱翠翠】
+---  AuthorID: 【254357】
+---  CreateTime: 【2022-12-16 10:46:29】
+--- 【FSync】
+--- 【AI纠音】
+---
+local class = require("middleclass")
+local WBElement = require("mworld/worldBaseElement")
+-- local cs_coroutine = require("common/cs_coroutine")
+
+---@type CS.UnityEngine.GameObject
+local GameObject = CS.UnityEngine.GameObject
+
+---@type CS.DG.Tweening.DOTween
+local DOTween = CS.DG.Tweening.DOTween
+
+---@type CS.UnityEngine.UI.Button
+local Button = CS.UnityEngine.UI.Button
+
+---@type CS.UnityEngine.UI.Text
+local Text = CS.UnityEngine.UI.Text
+
+---@type CS.UnityEngine.PlayerPrefs
+local PlayerPrefs = CS.UnityEngine.PlayerPrefs
+
+---@type CS.UnityEngine.AudioSource
+local AudioSource = CS.UnityEngine.AudioSource
+
+---@type CS.UnityEngine.Vector3
+local Vector3 = CS.UnityEngine.Vector3
+
+
+local DIALOGUE_AI_TRANSLATE = "DialogueAndAITranslate"
+-- 进入动画执行时间
+local ANIM_DURATION = 0.5
+
+-- 纠音结果等待时间
+local RESULT_WAIT_DURATION = 10
+
+-- 纠音链接超时等待时间
+local OVERTIME_WAIT_DURATION = 11
+
+-- 新手引导KEY
+local KEY_NEW_GUIDE = "AI-Guide"
+
+-- 原音引导KEY
+local KEY_AUDIO_GUIDE = "AI-Guide-Audio"
+
+-- 纠音开始
+local DIALOGUE_AI_START = "Dialogue.Ai.Start"
+-- 纠音结束
+local DIALOGUE_AI_FINISH = "Dialogue.Ai.Finish"
+
+local DIALOGUE_AI_PITCH = "DialogueAndAIAudioPitch"
+
+local TAG = "口语对话模版-AI纠音："
+
+---@class fsync_64e65795_3338_4d2a_a8fd_7354300086c0 : WorldBaseElement
+local FsyncElement = class("fsync_64e65795-3338-4d2a-a8fd-7354300086c0", WBElement)
+
+---@param worldElement CS.Tal.framesync.WorldElement
+function FsyncElement:initialize(worldElement)
+    FsyncElement.super.initialize(self, worldElement)
+
+    self.uniId = tostring(self.VisElement.gameObject.transform.parent.gameObject:GetInstanceID())
+
+    self.service_manager = CourseEnv.ServicesManager
+    self.service_observer = self.service_manager:GetObserverService()
+    self.service_config = self.service_manager:GetConfigService()
+    self.service_audio = self.service_manager:GetAudioService()
+    self.service_json = self.service_manager:GetJsonService()
+    ---@type CommonService
+    self.commonService = App:GetService("CommonService")
+    self:SubscribeInternalMsg()
+    self.VisElement.gameObject:SetActive(false)
+    self.canUse = false
+    self.pluginJson = App.Info.plugins
+    if self.pluginJson ~= nil and type(self.pluginJson) == "string" then
+        self:initPluginInfo()
+    end
+end
+
+function FsyncElement:initPluginInfo()
+    self.versionNumber = App.Info.appVersionNumber -- 获取版本号
+    local list = CourseEnv.ServicesManager:GetJsonService():decode(self.pluginJson)
+    for i, v in ipairs(list) do
+        if v.pluginName == "英语课对话卡慢速开关" then
+            self.canUse = v.pluginVal.open
+            break
+        end
+    end
+    g_LogColorMsg("英语课纠音对话卡慢速功能-canUse->" .. (self.canUse and 1 or 0))
+end
+
+--- 订阅内部消息
+function FsyncElement:SubscribeInternalMsg()
+    self.service_observer:Watch(DIALOGUE_AI_START .. self.uniId, function(key, args)
+        self:AI_Log("收到纠音.对话样式Message" .. table.dump(args[0].data))
+        self.VisElement.gameObject:SetActive(true)
+        -- 初始化数据
+        self:initData(args[0].data)
+        -- 初始化页面
+        self:init()
+        -- 开始纠音
+        self:checkAuth()
+
+        -- 埋点
+        self:reportData("ai_start", "应发音频次", {
+            ai_start = true
+        })
+    end)
+end
+-- 这一段代码有问题 重复寻找控件
+function FsyncElement:init()
+    -- 初始化配置
+    self:initConfig()
+
+    -- 初始化控件
+    self:initObject()
+
+    -- 初始化按钮点击事件监听
+    self:initAllBtnEvent()
+
+    -- 设置支持studio调试
+    self:setStudioStyle()
+
+    -- 页面重置默认状态
+    self:resetPage()
+end
+
+--- 初始化配置数据
+function FsyncElement:initConfig()
+    -- 结果阈值范围
+    self.thresholdVal = self.service_config:GetConfigValueByConfigKey(self.VisElement, "thresholdValRange")
+    -- 左值
+    self.smallNum = math.floor(tonumber(self.service_json:decode(self.thresholdVal)["x"]))
+    -- 右值
+    self.bigNum = math.floor(tonumber(self.service_json:decode(self.thresholdVal)["y"]))
+
+    -- 单个单词判断阈值
+    self.passVal = tonumber(self.service_config:GetConfigValueByConfigKey(self.VisElement, "passVal"))
+
+    -- 新手引导音频资源
+    self.guideSound = self.service_config:GetAssetByConfigKey(self.VisElement, "guideSound")
+    self.guideSound1 = self.service_config:GetAssetByConfigKey(self.VisElement, "guideSound1")
+    self.guideSound2 = self.service_config:GetAssetByConfigKey(self.VisElement, "guideSound2")
+    self.guideSound3 = self.service_config:GetAssetByConfigKey(self.VisElement, "guideSound3")
+    self.guideSound4 = self.service_config:GetAssetByConfigKey(self.VisElement, "guideSound4")
+    self.greatSound = self.service_config:GetAssetByConfigKey(self.VisElement, "greatSound")
+    self.goodSound = self.service_config:GetAssetByConfigKey(self.VisElement, "goodSound")
+    self.niceTrySound = self.service_config:GetAssetByConfigKey(self.VisElement, "nicetrySound")
+    -- UI样式模型
+    self.modelStr = self.service_config:GetConfigValueByConfigKey(self.VisElement, "modelContent")
+
+    -- 页面层级
+    self.sortingOrder = tonumber(self.service_config:GetConfigValueByConfigKey(self.VisElement, "sortingOrder"))
+
+    -- True 开启纠音 目前去掉配置默认全部都纠音
+    self.isToggle = true
+
+    -- 是否正在纠音录制中
+    self.isEvaluating = false
+
+    -- 是否正在展示翻译
+    self.showingTips = false
+
+    -- 是否正在播放原音
+    self.isPlayingAudio = false
+
+    -- 是否已经结束不可以再次开始
+    self.isFinish = false
+
+    -- 是否一直未监听到用户声音
+    self.isNoSpeak = true
+
+    -- 是否和端上已经建立连接
+    self.isSuccessConnectNative = false
+
+    -- 数据异常返回
+    self.isDataExceptional = false
+
+    -- 拦截多次点击权限申请
+    self.isInterceptMicTouch = false
+
+    -- 引导次数
+    self.countGuide = 0
+
+    -- 是否展示toast
+
+    self.isShowToast = false
+
+
+end
+
+--- 初始化数据
+function FsyncElement:initData(data)
+    self.needAutoStop = true
+    self.isHighScore = false
+    local studentName = App.Info.englishName
+    if (not studentName) or studentName == "" then
+        studentName = "_____"
+    end
+    self.questionId = data.questionId
+    self.isAward = data.isAward
+    self.isAgain = data.isAgain
+    self.fightingName = data.fightingName
+    self.evalContent = nil
+    -- 英文展示文案
+    self.evalShowText = self:switchPunctuation(self:getNewSentence(data.showText))
+
+    -- 需要纠音英文文案
+    if data.evalContent and data.evalContent ~= "" then
+        self.evalContent = self:switchPunctuation(self:getNewSentence(data.evalContent))
+    end
+    if self.evalShowText and string.contains(self.evalShowText, "#_englishname_#") then
+        self.evalShowText = string.gsub(self.evalShowText, "#_englishname_#", studentName)
+    end
+    ---如果没配置纠音文案，就用展示文案
+    if not self.evalContent or self.evalContent == "" then
+        self.evalContent = self.evalShowText
+    end
+    if self.evalContent and string.contains(self.evalContent, "#_englishname_#") then
+        self.evalContent = string.gsub(self.evalContent, "#_englishname_#", studentName)
+    end
+    if self.evalContent and string.contains(self.evalContent, "_____") then
+        self.needAutoStop = false
+    end
+    if self.evalContent and string.contains(self.evalContent, "_____") then
+        self.needAutoStop = false
+        local lastFour = string.sub(self.evalContent, -4)
+        for i = 1 , #lastFour do
+            local c = string.sub(lastFour, i, i)
+            if string.match(c, "%a") then
+                self.needAutoStop = true
+                break
+            end
+        end
+    end
+    -- 中文翻译
+    self.tipsText = data.tipsText
+    if self.tipsText == "" then
+        self.noTranslate = true
+    else
+        self.noTranslate = false
+    end
+    if self.tipsText and string.contains(self.tipsText, "#_englishname_#") then
+        self.tipsText = string.gsub(self.tipsText, "#_englishname_#", studentName)
+    end
+    -- 收音时长
+    -- self.evalDuration = tonumber(data.duration)
+    self.evalDuration = (tonumber(data.duration) == nil or tonumber(data.duration) == 0) and 20 or tonumber(data.duration)
+   
+
+    -- if self.evalDuration == 0 then
+    --     self.evalDuration = 20
+    -- end
+
+    -- 原音资源
+    -- self.standardAudio = data.standardAudio
+    self.standardAudio = nil
+    if data.standardAudio and data.standardAudio ~= "" then
+        local audio = self.service_json:decode(data.standardAudio)
+        self.audioUrl = audio.uId
+        self.standardAudio = self.service_manager:GetAssetService():GetConfigGameObjectWithUAddress(self.VisElement
+                                                                                                        .gameObject
+                                                                                                        .transform
+                                                                                                        .parent,
+            audio.uAddress)
+    end
+
+    -- 上传学习报告组件id
+    self.moduleId = data.moduleId
+    -- 上传学习报告中文
+    self.chText = data.chText
+    if self.chText and self.chText ~= "" and string.contains(self.chText, "#_englishname_#") then
+        self.chText = string.gsub(self.chText, "#_englishname_#", studentName)
+    end
+    -- 上传学习报告英文
+    self.enText = data.enText
+    if self.enText and self.enText ~= "" and string.contains(self.enText, "#_englishname_#") then
+        self.enText = string.gsub(self.enText, "#_englishname_#", studentName)
+    end
+    -- 是否展示原音按钮
+    self.hasStandardAudio = false
+
+    if self.standardAudio then
+        self.hasStandardAudio = true
+    end
+end
+
+--- 初始化
+function FsyncElement:initObject()
+    if self.modelStr and self.modelStr ~= "" then
+        self:AI_Log("UI初始化")
+        local modelTable = self.service_json:decode(self.modelStr)
+        local panelAddress = modelTable.uAddress
+
+        if panelAddress or panelAddress ~= "" then
+            local panel = self.service_manager:GetAssetService():GetConfigGameObjectWithUAddress(self.VisElement,
+                panelAddress)
+
+            self.root = CS.UnityEngine.GameObject.Instantiate(panel)
+        else
+            self:AI_Log("UI模型地址不存在！！！！！！！")
+            return
+        end
+    else
+        self:AI_Log("没有配置UI模型！！！！！！")
+        return
+    end
+
+    -- Canvas
+    local rootCanvas = self.root.gameObject:GetComponent(typeof(CS.UnityEngine.Canvas))
+    rootCanvas.sortingOrder = self.sortingOrder
+    -- 音频播放速度
+    self.audioSoursePitch = PlayerPrefs.GetFloat(DIALOGUE_AI_PITCH,1)
+    self.showingTips = PlayerPrefs.GetInt(DIALOGUE_AI_TRANSLATE, 0) == 1
+    -- 评测展示文案
+    ---@type CS.UnityEngine.UI.Text
+    self.evalText = self.root.transform:Find("平移动效/提示原音父/跟读文本").gameObject:GetComponent(typeof(Text))
+    self.evalTextRect = self.root.transform:Find("平移动效/提示原音父/跟读文本").gameObject:GetComponent(typeof(CS.UnityEngine.RectTransform))
+    self.moveRect = self.root.transform:Find("平移动效/提示原音父")
+    -- 提示-原音父布局
+    self.cnEvalTips = self.root.transform:Find("平移动效/提示原音父/提示-原音").gameObject
+    -- 提示背景
+    self.cnEvalTextBg = self.root.transform:Find("平移动效/提示原音父/提示-原音/提示").gameObject
+    self.tipsBg01 = self.root.transform:Find("平移动效/提示原音父/提示-原音/提示/背景1").gameObject
+    self.tipsBg02 = self.root.transform:Find("平移动效/提示原音父/提示-原音/提示/背景2").gameObject
+    self.tipsBg03 = self.root.transform:Find("平移动效/提示原音父/提示-原音/提示/背景3").gameObject
+    self.cnEvalTextBg:SetActive(false)
+    -- 中文提示文案
+    self.cnEvalText = self.root.transform:Find("平移动效/提示原音父/提示-原音/提示/提示文本")
+                          .gameObject:GetComponent(typeof(Text))
+    -- 翻译按钮
+    self.mansuBtn =  self.root.transform:Find("平移动效/提示原音父/提示-原音/慢速").gameObject:GetComponent(typeof(
+        Button))
+
+    self.cancelMansuBtn = self.root.transform:Find("平移动效/提示原音父/提示-原音/慢速中").gameObject:GetComponent(typeof(
+        Button))
+
+
+    self.showTipBtn =
+        self.root.transform:Find("平移动效/提示原音父/提示-原音/翻译").gameObject:GetComponent(typeof(
+            Button))
+    -- 收起按钮
+    self.hideTipBtn =
+        self.root.transform:Find("平移动效/提示原音父/提示-原音/收起").gameObject:GetComponent(typeof(
+            Button))
+
+    -- 原音按钮灰
+    self.audioBtn =
+        self.root.transform:Find("平移动效/提示原音父/提示-原音/原音灰").gameObject:GetComponent(typeof(
+            Button))
+    -- 原音按钮绿
+    self.audioStopBtn =
+        self.root.transform:Find("平移动效/提示原音父/提示-原音/原音绿").gameObject:GetComponent(typeof(
+            Button))
+    -- 发言按钮
+    self.startBtn = self.root.transform:Find("开始发言").gameObject:GetComponent(typeof(Button))
+
+    self.bottomPadding = self.startBtn.transform.position.y + self.startBtn.transform:GetComponent(typeof(CS.UnityEngine.RectTransform)).rect.height
+
+    -- 结束按钮
+    self.finishBtn = self.root.transform:Find("说完了绿").gameObject:GetComponent(typeof(Button))
+
+    -- 原音按钮动效相关
+    self.audioIcon01 = self.root.transform:Find("平移动效/提示原音父/提示-原音/原音绿/原音绿1")
+                           .gameObject
+    self.audioIcon02 = self.root.transform:Find("平移动效/提示原音父/提示-原音/原音绿/原音绿2")
+                           .gameObject
+    self.audioIcon03 = self.root.transform:Find("平移动效/提示原音父/提示-原音/原音绿/原音绿3")
+                           .gameObject
+
+    -- 结果展示图片相关
+    self.greatIcon = self.root.transform:Find("great").gameObject
+    self.goodIcon = self.root.transform:Find("good").gameObject
+    self.fightingIcon = self.root.transform:Find("fighting").gameObject
+   --更新反馈
+   self.TryAgain = self.fightingIcon.transform:GetChild(2).gameObject
+   self.NiceTry = self.fightingIcon.transform:GetChild(3).gameObject
+    self.loadingIcon = self.root.transform:Find("平移动效/网络加载").gameObject
+    self.waveTips = self.root.transform:Find("请发言").gameObject
+    self.finishIcon = self.root.transform:Find("说完了灰").gameObject
+
+    -- 倒计时相关
+    self.countDownTimeRoot = self.root.transform:Find("倒计时").gameObject
+    self.countDownTime = self.root.transform:Find("倒计时/倒计时文本").gameObject:GetComponent(typeof(Text))
+
+    -- 原音 引导相关
+    self.rootAudioGuide = self.root.transform:Find("平移动效/提示原音父/提示-原音/原音引导").gameObject
+    self.audioGuideBtn =
+        self.root.transform:Find("平移动效/提示原音父/提示-原音/原音引导/原音按钮").gameObject:GetComponent(
+            typeof(Button))
+    self.audioGuideBig = self.root.transform:Find("平移动效/提示原音父/提示-原音/原音引导/原音大")
+                             .gameObject
+
+
+    -- 无权限相关
+    self.micAuthRoot = self.root.transform:Find("无权限").gameObject
+    self.micAuthBtn = self.root.transform:Find("无权限按钮").gameObject:GetComponent(typeof(Button))
+    self.micAuthText = self.root.transform:Find("无权限/无权限文本").gameObject:GetComponent(typeof(Text))
+
+    -- 渐入动画
+    self.rootAnim = self.root.transform:Find("平移动效").gameObject
+
+    self.rootAnim.transform.position = Vector3(0, -480, 0)
+    -- 音效相关
+    self.audioSource = self.root.transform:Find("甲音频"):GetComponent(typeof(AudioSource))
+
+    self.AudioMixer = self.audioSource.outputAudioMixerGroup.audioMixer
+    -- self.goodSound = self.root.transform:Find("乙音频"):GetComponent(typeof(AudioSource))
+    -- self.failSound = self.root.transform:Find("丙音频"):GetComponent(typeof(AudioSource))
+    -- toast
+    self.toast = self.root.transform:Find("Toast").gameObject
+    self.toastText = self.toast.transform:Find("Text (TMP)"):GetComponent(typeof(CS.TMPro.TextMeshProUGUI))
+    self.slowStyleText = "对话语速已切换为慢速～"
+    self.normalStyleText = "对话语速已恢复为正常～"
+    -- 引导相关
+    self.rootGuide = self.root.transform:Find("引导相关").gameObject
+    self.guideIcon = self.root.transform:Find("引导相关/图片1").gameObject
+    self.guideIcon1 = self.root.transform:Find("引导相关/图片2").gameObject
+    self.guideIcon2 = self.root.transform:Find("引导相关/图片3").gameObject
+    self.guideIcon3 = self.root.transform:Find("引导相关/图片4").gameObject
+    self.guideIcon4 = self.root.transform:Find("引导相关/图片").gameObject
+    -- 音波动效
+    self.rootVocieAnim = self.root.transform:Find("音波动效").gameObject
+    self.vocieAnim01 = self.root.transform:Find("音波动效/图片01").gameObject
+    self.vocieAnim02 = self.root.transform:Find("音波动效/图片02").gameObject
+    self.vocieAnim03 = self.root.transform:Find("音波动效/图片03").gameObject
+    self.vocieAnim04 = self.root.transform:Find("音波动效/图片04").gameObject
+    self.vocieAnim05 = self.root.transform:Find("音波动效/图片05").gameObject
+    self.vocieAnim06 = self.root.transform:Find("音波动效/图片06").gameObject
+    self.vocieAnim07 = self.root.transform:Find("音波动效/图片07").gameObject
+    self.vocieAnim08 = self.root.transform:Find("音波动效/图片08").gameObject
+    self.vocieAnim09 = self.root.transform:Find("音波动效/图片09").gameObject
+    self.vocieAnim10 = self.root.transform:Find("音波动效/图片10").gameObject
+
+    self.evalText.text = self.evalShowText
+    -- 原文本
+    self.sourseText = self.evalShowText
+    -- 翻译文本
+    self.translateText = self.tipsText
+    self.cnEvalText.text = self.tipsText
+    self.micAuthText.text = self.evalShowText
+
+
+end
+
+--- 按钮事件
+function FsyncElement:initAllBtnEvent()
+    -- 展开翻译
+    App:GetService("CommonService"):AddEventListener(self.showTipBtn, "onClick", function()
+        self:showTips()
+    end)
+
+    -- 收回翻译
+    App:GetService("CommonService"):AddEventListener(self.hideTipBtn, "onClick", function()
+        self:hideTips()
+    end)
+
+    -- 播放原音
+    App:GetService("CommonService"):AddEventListener(self.audioBtn, "onClick", function()
+        if self.isFinish then
+            return
+        end
+   
+        self.isPlayingAudio = true
+        self:clickAudioBtn()
+        self:onPause()
+    end)
+    App:GetService("CommonService"):AddEventListener(self.mansuBtn,"onClick",function()
+        self.mansuBtn.gameObject:SetActive(false)
+        self.cancelMansuBtn.gameObject:SetActive(true)
+
+        self.audioSoursePitch = 0.75
+
+        self.isShowToast = true 
+        self.toast:SetActive(true)
+        self.toastText.text = self.slowStyleText
+        if self.toastCoroutine then
+            self.commonService:StopCoroutineSafely(self.toastCoroutine)
+            self.toastCoroutine = nil
+        end
+        self.toastCoroutine  = self.commonService:StartCoroutine(function()
+            self.commonService:YieldSeconds(2)
+            self.toast.gameObject:SetActive(false)
+            self.isShowToast = false
+        end)
+        PlayerPrefs.SetFloat(DIALOGUE_AI_PITCH, 0.75)
+        PlayerPrefs.Save()
+        self.isPlayingAudio = true
+        self:clickAudioBtn()
+        self:onPause()
+    end)
+                        
+    App:GetService("CommonService"):AddEventListener(self.cancelMansuBtn,"onClick",function()
+        self.audioSoursePitch = 1
+
+
+        PlayerPrefs.SetFloat(DIALOGUE_AI_PITCH, 1)
+        PlayerPrefs.Save()
+        if self.isShowToast then
+            self.commonService:StopCoroutineSafely(self.toastCoroutine)
+            self.toastCoroutine = nil
+        end
+        self.toast.gameObject:SetActive(true)
+        self.toastText.text = self.normalStyleText
+        self.isShowToast = true
+        self.toastCoroutine  = self.commonService:StartCoroutine(function()
+            self.commonService:YieldSeconds(2)
+            self.toast.gameObject:SetActive(false)
+            self.isShowToast = false
+        end)
+        self.mansuBtn.gameObject:SetActive(true)
+        self.cancelMansuBtn.gameObject:SetActive(false)
+        end)
+    -- 停止播放原音
+    App:GetService("CommonService"):AddEventListener(self.audioStopBtn, "onClick", function()
+        self.isPlayingAudio = false
+        self:clickAudioBtn()
+    end)
+
+    -- 原音呼吸按钮
+    App:GetService("CommonService"):AddEventListener(self.audioGuideBtn, "onClick", function()
+        self.isPlayingAudio = true
+        self:setAudioGuideAnim(false)
+        self:clickAudioBtn()
+        self:onPause()
+    end)
+
+    -- 手动结束
+    App:GetService("CommonService"):AddEventListener(self.finishBtn, "onClick", function()
+        self:AI_Log("用户手动点击结束按钮")
+        self:onFinish()
+    end)
+
+    -- 重新开始
+    App:GetService("CommonService"):AddEventListener(self.startBtn, "onClick", function()
+        if self.isPlayingAudio then
+            self.isPlayingAudio = false
+            self:clickAudioBtn()
+        end
+        self:AI_Log("用户手动点击开始按钮")
+        self:onRestart()
+    end)
+
+    -- 申请权限
+    App:GetService("CommonService"):AddEventListener(self.micAuthBtn, "onClick", function()
+        self:AI_Log("用户手动点击请求权限按钮")
+        if self.isInterceptMicTouch then
+            return
+        end
+
+        self.isInterceptMicTouch = true
+        self:sendNativeRequestAuth()
+    end)
+end
+
+--- *******************************************studio便捷使用相关******************************************
+--- studio组课便捷使用样式
+function FsyncElement:setStudioStyle()
+    self.gBtn = self.root.transform:Find("通过").gameObject:GetComponent(typeof(Button))
+    self.lBtn = self.root.transform:Find("不通过").gameObject:GetComponent(typeof(Button))
+
+    App:GetService("CommonService"):AddEventListener(self.gBtn, "onClick", function()
+        self:checkEvalScore(100)
+    end)
+    App:GetService("CommonService"):AddEventListener(self.lBtn, "onClick", function()
+        self:checkEvalScore(0)
+    end)
+end
+
+--- studio组课便捷使用开始
+function FsyncElement:studioStart()
+    -- studio模拟纠音
+    self.isToggle = false
+
+    -- 默认连接成功
+    self.isSuccessConnectNative = true
+
+    self:onStart()
+end
+
+--- *******************************************以下页面样式相关*********************************************
+--- 重置页面
+function FsyncElement:resetPage()
+    -- self:setTipsStatus()
+    self.showTipBtn.gameObject:SetActive(not self.showingTips)
+    self.hideTipBtn.gameObject:SetActive(self.showingTips)
+
+    if self.noTranslate then
+        self.showTipBtn.gameObject:SetActive(false)
+        self.hideTipBtn.gameObject:SetActive(false)
+        -- 还需要移动慢速按钮的位置
+    end
+    -- if self.audioSoursePitch == 1.0 then
+    --     self.mansuBtn.gameObject:SetActive(true)
+    --     self.cancelMansuBtn.gameObject:SetActive(false)
+    -- else
+    --     self.mansuBtn.gameObject:SetActive(false)
+    --     self.cancelMansuBtn.gameObject:SetActive(true)
+    -- end
+    if self.canUse then
+        if self.audioSoursePitch == 1.0 then
+            self.mansuBtn.gameObject:SetActive(true)
+            self.cancelMansuBtn.gameObject:SetActive(false)
+        elseif self.audioSoursePitch == 0.75 then
+            self.mansuBtn.gameObject:SetActive(false)
+            self.cancelMansuBtn.gameObject:SetActive(true)
+        end
+    else
+        self.mansuBtn.gameObject:SetActive(false)
+        self.cancelMansuBtn.gameObject:SetActive(false)
+        self.audioSource.pitch = 1
+        self.audioSoursePitch = 1
+        PlayerPrefs.SetFloat(DIALOGUE_AI_PITCH, 1)
+        PlayerPrefs.Save()
+    end
+
+    
+    self.rootAudioGuide:SetActive(false)
+    self.rootVocieAnim:SetActive(false)
+    self.rootGuide:SetActive(false)
+    self.greatIcon:SetActive(false)
+    self.goodIcon:SetActive(false)
+    self.fightingIcon:SetActive(false)--更新反馈
+    self.NiceTry:SetActive(false)
+    self.TryAgain:SetActive(false)
+    self.loadingIcon:SetActive(false)
+    self.waveTips:SetActive(false)
+    self.finishIcon:SetActive(false)
+    self.micAuthRoot:SetActive(false)
+    self.countDownTimeRoot:SetActive(false)
+    self.micAuthBtn.gameObject:SetActive(false)
+    self.gBtn.gameObject:SetActive(false)
+    self.lBtn.gameObject:SetActive(false)
+    self.startBtn.gameObject:SetActive(false)
+    self.finishBtn.gameObject:SetActive(false)
+    self.audioStopBtn.gameObject:SetActive(false)
+    self.audioBtn.gameObject:SetActive(false)
+    self.evalText.gameObject:SetActive(false)
+  
+    if self.toastCoroutine then
+        self.commonService:StopCoroutineSafely(self.toastCoroutine)
+        self.toastCoroutine = nil
+    end
+
+    self.toast.gameObject:SetActive(false)
+   
+end
+
+
+--- 显示中文提示
+function FsyncElement:showTips()
+    self.showingTips = true   
+    g_LogError("纠音开启翻译！！")
+    PlayerPrefs.SetInt(DIALOGUE_AI_TRANSLATE, 1)
+    PlayerPrefs.Save()
+    self:setTipsStatus()
+end
+
+--- 隐藏中文提示
+function FsyncElement:hideTips()
+    self.showingTips = false
+    g_LogError("纠音关闭翻译！！")
+    PlayerPrefs.SetInt(DIALOGUE_AI_TRANSLATE, 0)
+    PlayerPrefs.Save()
+    self:setTipsStatus()
+end
+
+--- 提示样式
+function FsyncElement:setTipsStatus()
+
+    self.showTipBtn.gameObject:SetActive(not self.showingTips)
+    self.hideTipBtn.gameObject:SetActive(self.showingTips)
+    if self.noTranslate then
+        self.showTipBtn.gameObject:SetActive(false)
+        self.hideTipBtn.gameObject:SetActive(false)
+    end
+    if self.showingTips then
+        if self.noTranslate then
+            return
+        end
+        self.evalText.text = self.sourseText.."\n"..self.translateText
+        local padding = self.evalTextRect.rect.height - self.evalText.preferredHeight 
+        self.moveRect.transform.position = CS.UnityEngine.Vector3(self.moveRect.transform.position.x,self.bottomPadding - padding + 10, 0)
+    else    
+        self.evalText.text = self.sourseText
+        self.moveRect.transform.position = CS.UnityEngine.Vector3(self.moveRect.transform.position.x,0, 0)
+    end
+end
+
+-- 原音按钮点击
+function FsyncElement:clickAudioBtn()
+    if self.isPlayingAudio then
+        -- 播放原音
+        self.cancelMansuBtn.interactable = false
+        self.mansuBtn.interactable = false
+        self:playAudio()
+        self:setFirstAudioGuide()
+        self:AI_Log("用户手动点击原音播放")
+    else
+        self.cancelMansuBtn.interactable = true
+        self.mansuBtn.interactable = true
+        -- 停止原音
+        self:stopAudio()
+    end
+end
+
+function FsyncElement:setAudioBtnStyle()
+    self.audioBtn.gameObject:SetActive(not self.isPlayingAudio)
+    self.audioStopBtn.gameObject:SetActive(self.isPlayingAudio)
+end
+
+--- 动态设置翻译的高度以及背景高度
+function FsyncElement:setHeightTips()
+    if self.evalShowText == nil or self.evalShowText == "" then
+        return
+    end
+
+    local rowText = self.evalText.cachedTextGenerator.lineCount
+    local bottom = 200
+    if rowText == 2 then
+        bottom = 236
+    elseif rowText >= 3 then
+        bottom = 272
+    end
+    self.cnEvalTips.transform.localPosition = Vector3(0, bottom, 0)
+
+    local rowTips = self:getRowNum(self.tipsText, self.cnEvalText, 3, 952)
+    self.tipsBg01:SetActive(rowTips == 1)
+    self.tipsBg02:SetActive(rowTips == 2)
+    self.tipsBg03:SetActive(rowTips >= 3)
+end
+
+--- 计算展示文本行数
+function FsyncElement:getRowNum(text, textComponent, index, w)
+    local fontNum = math.ceil(string.len(text) / index)
+    local fontSize = textComponent.fontSize
+    local len = fontNum * fontSize + 10
+    local row = math.ceil(len / w)
+    -- self:AI_Log("文案行数=" .. row .. "  文案=" .. text)
+    return row
+end
+
+--- 新手引导样式
+function FsyncElement:setGuideStyle(isShow)
+    if isShow then
+        self.guideIcon:SetActive(false)
+        self.guideIcon1:SetActive(false)
+        self.guideIcon2:SetActive(false)
+        self.guideIcon3:SetActive(false)
+    end
+    self.rootGuide:SetActive(isShow)
+end
+
+---@public 修改UI面板
+function FsyncElement:changeOperationState(show)
+    -- self:AI_Log("底部按钮显示影藏：" .. tostring(show))
+    local joystickService = CourseEnv.ServicesManager.GetJoystickService()
+    local UIService = CourseEnv.ServicesManager:GetUIService()
+    if show then
+        UIService:showCommonMenu()
+        if self.hideJumpId then
+            joystickService:setVisibleJumpWithID(self.hideJumpId)
+        end
+        if self.hideJoyId then
+            joystickService:setVisibleJoyWithID(self.hideJoyId)
+        end
+        -- joystickService:hidenJoyAndJump(false)
+    else
+        UIService:hidenCommonMenu()
+        self.hideJumpId = joystickService:setHidenJumpWithID()
+        self.hideJoyId = joystickService:setHidenJoyWithID()
+        -- joystickService:hidenJoyAndJump(true)
+    end
+end
+
+--- 倒计时样式
+function FsyncElement:formatCountDownTime(countDownTime)
+    if (countDownTime > 0) then
+        self.countDownTimeRoot:SetActive(true)
+    else
+        self.countDownTimeRoot:SetActive(false)
+    end
+
+    if (countDownTime >= 10) then
+        self.countDownTime.text = "00:" .. tostring(countDownTime)
+    else
+        self.countDownTime.text = "00:0" .. tostring(countDownTime)
+    end
+end
+
+--- 纠音样式
+function FsyncElement:evaluatingStyle()
+    -- 重新开始按钮
+    self.startBtn.gameObject:SetActive(not self.isEvaluating)
+
+    -- 隐藏音波动效
+    self:setVoiceAnim(self.isEvaluating)
+
+    -- 灰色结束按钮显示
+    self.finishIcon:SetActive(self.isEvaluating)
+
+    if not self.isEvaluating then
+        -- 结束按钮隐藏
+        self.finishBtn.gameObject:SetActive(false)
+
+        self.countDownTimeRoot:SetActive(false)
+    end
+end
+
+--- 无权限样式
+function FsyncElement:micAuthStyle(isShow)
+    self.micAuthRoot:SetActive(isShow)
+    self.micAuthBtn.gameObject:SetActive(isShow)
+end
+
+--- *******************************************以下页面动画相关*********************************************
+--- 音波动效
+function FsyncElement:setVoiceAnim(isShow)
+    self.rootVocieAnim:SetActive(isShow)
+    self.waveTips:SetActive(isShow)
+    if self.coroutineVoiceAnim then
+        self.commonService:StopCoroutineSafely(self.coroutineVoiceAnim)
+        -- cs_coroutine.stop(self.coroutineVoiceAnim)
+        self.coroutineVoiceAnim = nil
+    end
+    if isShow then
+        self.coroutineVoiceAnim = self.commonService:StartCoroutine(function()
+            local index = 1
+            while true do
+                if index > 10 then
+                    index = 1
+                end
+                self.commonService:YieldSeconds(0.12)
+                -- coroutine.yield(CS.UnityEngine.WaitForSeconds(0.12))
+                self.vocieAnim01:SetActive(index == 1)
+                self.vocieAnim02:SetActive(index == 2)
+                self.vocieAnim03:SetActive(index == 3)
+                self.vocieAnim04:SetActive(index == 4)
+                self.vocieAnim05:SetActive(index == 5)
+                self.vocieAnim06:SetActive(index == 6)
+                self.vocieAnim07:SetActive(index == 7)
+                self.vocieAnim08:SetActive(index == 8)
+                self.vocieAnim09:SetActive(index == 9)
+                self.vocieAnim10:SetActive(index == 10)
+                index = index + 1
+            end
+        end)
+    end
+end
+
+--- 原音呼吸动画
+function FsyncElement:setAudioGuideAnim(isShow)
+    if not self.hasStandardAudio then
+        return
+    end
+
+    self.rootAudioGuide:SetActive(isShow)
+    if self.seq then
+        self.seq:Kill()
+    end
+    if isShow then
+        self.audioBtn.gameObject:SetActive(false)
+        local rect = self.audioGuideBig.gameObject.transform
+        self.seq = DOTween:Sequence()
+        self.seq:Append(rect:DOScale(1.1, 1))
+        self.seq:SetLoops(6, CS.DG.Tweening.LoopType.Yoyo)
+        self.seq:OnComplete(function()
+            self.audioBtn.gameObject:SetActive(true)
+            self.rootAudioGuide:SetActive(false)
+            self:setFirstAudioGuide()
+            self.seq = nil
+        end)
+    end
+end
+
+--- 原音播放动画
+function FsyncElement:showAudioPlayAnim(isShow)
+    self:setAudioBtnStyle()
+    if self.coroutineAudio then
+        self.commonService:StopCoroutineSafely(self.coroutineAudio)
+        -- cs_coroutine.stop(self.coroutineAudio)
+        self.coroutineAudio = nil
+    end
+    if isShow then
+        self.audioIcon01:SetActive(false)
+        self.audioIcon02:SetActive(false)
+        self.audioIcon03:SetActive(true)
+
+        self.coroutineAudio = self.commonService:StartCoroutine(function()
+            local index = 1
+            while true do
+                if index > 3 then
+                    index = 1
+                end
+                self.commonService:YieldSeconds(0.5)
+                -- coroutine.yield(CS.UnityEngine.WaitForSeconds(0.5))
+                self.audioIcon01:SetActive(index == 1)
+                self.audioIcon02:SetActive(index == 2)
+                self.audioIcon03:SetActive(index == 3)
+                index = index + 1
+            end
+        end)
+    end
+end
+
+--- 进场动画
+function FsyncElement:showEntryAnim()
+    -- self.showTipBtn.gameObject:SetActive(true)
+    self.evalText.gameObject:SetActive(true)
+    self.audioBtn.gameObject:SetActive(self.hasStandardAudio)
+    self.cnEvalTips:SetActive(false)
+
+    if self.isToggle then
+        -- 需要纠音Ò
+        self:sendNativeStart()
+    end
+
+    if self.seqEntryAnim then
+        self.seqEntryAnim:Kill()
+    end
+
+    self.seqEntryAnim = DOTween:Sequence()
+
+    self.seqEntryAnim:Append(self.rootAnim.gameObject.transform:DOMoveY(0, ANIM_DURATION))
+    self.seqEntryAnim:OnComplete(function()
+        self:AI_Log("进场动画结束")
+        self.cnEvalTips:SetActive(true)
+        -- self:setHeightTips()
+        self:setTipsStatus()
+        self:setLoadingAnim(true, true)
+        self.seqEntryAnim = nil
+    end)
+end
+
+--- loading动画
+function FsyncElement:setLoadingAnim(isShow, isStart)
+ --   self.:SetActive(isShow)
+    self.startBtn.gameObject:SetActive(false)
+
+    if self.coroutineAnim then
+        self.commonService:StopCoroutineSafely(self.coroutineAnim)
+        -- cs_coroutine.stop(self.coroutineAnim)
+        self.coroutineAnim = nil
+    end
+
+    if isShow then
+
+        self.coroutineAnim = self.commonService:StartCoroutine(function()
+            local zAngle = 0
+            while true do
+                if isStart and self.isSuccessConnectNative then
+                    -- 隐藏loading动画
+                    self:setLoadingAnim(false, false)
+                    self:startEvaluating()
+                    return
+                end
+                self.commonService:YieldSeconds(0.03)
+                -- coroutine.yield(CS.UnityEngine.WaitForSeconds(0.03))
+                zAngle = zAngle + 7
+              --  self.loadingIcon.gameObject.transform.rotation = CS.UnityEngine.Quaternion.Euler(0, 0, zAngle)
+            end
+        end)
+    end
+    if isShow and isStart and not self.isSuccessConnectNative then
+        self.coroutineStartLoading = self.commonService:StartCoroutine(function()
+            self.commonService:YieldSeconds(OVERTIME_WAIT_DURATION)
+            -- coroutine.yield(CS.UnityEngine.WaitForSeconds(OVERTIME_WAIT_DURATION))
+            if not self.isSuccessConnectNative then
+                self:setLoadingAnim(false, false)
+                self:startEvaluating()
+            end
+        end)
+    else
+        if self.coroutineStartLoading then
+            self.commonService:StopCoroutineSafely(self.coroutineStartLoading)
+            -- cs_coroutine.stop(self.coroutineStartLoading)
+            self.coroutineStartLoading = nil
+        end
+    end
+end
+
+--- *******************************************以下为新手/原音引导相关*********************************************
+--- 新手引导
+function FsyncElement:toGuide()
+    self:AI_Log("新手引导开始")
+    self:setGuideStyle(true)
+    self.guideIcon:SetActive(true)
+    self.showGuideCo = self.commonService:StartCoroutine(function()
+        self.commonService:YieldSeconds(1)
+        -- coroutine.yield(CS.UnityEngine.WaitForSeconds(1))
+        self:playGuideAudio(1)
+    end)
+end
+
+--- 新手引导对应音频播放
+function FsyncElement:playGuideAudio(index)
+    if self.playingGuideAudio then
+        self.service_audio:StopAudioSource(self.playingGuideAudio)
+        self.playingGuideAudio = nil
+    end
+    if index == 6 then
+        self:AI_Log("新手引导结束")
+
+        -- 引导结束
+        self:setFirstGuide()
+        self:setGuideStyle(false)
+
+        -- 监听测评结果
+        self:registerResultListener()
+        self:onEntryAnim()
+        return
+    end
+
+    self.guideIcon:SetActive(index == 1)
+    self.guideIcon1:SetActive(index == 2)
+    self.guideIcon2:SetActive(index == 3)
+    self.guideIcon3:SetActive(index == 4 )
+    self.guideIcon4:SetActive(index == 5 )
+    local audio = self.guideSound
+    if index == 1 then
+        audio = self.guideSound
+    elseif index == 2 then
+        audio = self.guideSound1
+    elseif index == 3 then
+        audio = self.guideSound2
+    elseif index == 4 then
+        audio = self.guideSound3
+    else 
+        audio = self.guideSound4
+    end
+    self.playingGuideAudio = self.service_audio:PlayClipOneShot(audio, function()
+        self:playGuideAudio(index + 1)
+    end)
+end
+
+--- *******************************************以下为纠音主要逻辑**************************************************
+--- 权限判断
+function FsyncElement:checkAuth()
+    self:AI_Log("判断权限：" .. self.evalShowText)
+    if App.IsStudioClient then
+        self:studioStart()
+    else
+        self:sendNativeCheckAuth()
+    end
+end
+
+--- 正式开始
+function FsyncElement:onStart()
+    -- 隐藏底部按钮
+    self:changeOperationState(false)
+
+    if self:isFirstToGuide() then
+        -- 新手引导
+        self:toGuide()
+    else
+        -- 监听测评结果
+        self:registerResultListener()
+        -- 开始纠音
+        self:onEntryAnim()
+    end
+end
+
+--- 开始动画
+function FsyncElement:onEntryAnim()
+    self.isEvaluating = true
+
+    local time = tostring(os.time())
+    self:AI_Log("开始计时：" .. time)
+
+    -- 请求纠音id
+    self.curEvalId = time
+    -- 进入动画
+    self:showEntryAnim()
+end
+
+--- 正在录音
+function FsyncElement:startEvaluating()
+    self:AI_Log("正式开始收音")
+
+    self:evaluatingStyle()
+
+    -- 倒计时开始
+    local duration = self.evalDuration
+    self:formatCountDownTime(duration)
+    self.coroutineEvaluating = self.commonService:StartCoroutine(function()
+        self.finishIcon:SetActive(false)
+        self.finishBtn.gameObject:SetActive(true)
+        for i = 1, self.evalDuration, 1 do
+            self.commonService:YieldSeconds(1)
+            -- coroutine.yield(CS.UnityEngine.WaitForSeconds(1))
+            duration = duration - 1
+            self:formatCountDownTime(duration)
+
+            if (duration < 1) then
+                self:onFinish()
+            end
+
+            -- 5S内未发言原音呼吸引导
+            if self.evalDuration - duration == 5 and self.isNoSpeak and self:isFirstToAudioGuide() then
+                self:setAudioGuideAnim(true)
+            end
+        end
+    end)
+end
+
+--- 重新开始
+function FsyncElement:onRestart()
+    self.isEvaluating = true
+
+    local time = tostring(os.time())
+    self:AI_Log("重新开始计时：" .. time)
+
+    self.curEvalId = time
+    if self.isToggle then
+        -- 需要纠音
+        self:sendNativeStart()
+    end
+
+    self:setLoadingAnim(true, true)
+end
+
+--- 暂停纠音
+function FsyncElement:onPause()
+    self:AI_Log("暂停")
+    if self.coroutineEvaluating then
+        self.commonService:StopCoroutineSafely(self.coroutineEvaluating)
+        -- cs_coroutine.stop(self.coroutineEvaluating)
+        self.coroutineEvaluating = nil
+    end
+
+    if not self.isEvaluating then
+        return
+    end
+    self.isEvaluating = false
+
+    self:evaluatingStyle()
+
+    if self.isToggle then
+        -- 需要纠音
+        self:sendNativeCancel()
+    end
+end
+
+--- 结束纠音
+function FsyncElement:onFinish()
+    self:AI_Log("计时结束")
+    self.service_observer:Fire("PUSH_AI_COURSE_STUDY_DATA_FOR_TIPS",{read_count = 1,sentence_count = {self.evalContent}})
+    self.isFinish = true
+
+    if self.coroutineEvaluating then
+        self.commonService:StopCoroutineSafely(self.coroutineEvaluating)
+        -- cs_coroutine.stop(self.coroutineEvaluating)
+        self.coroutineEvaluating = nil
+    end
+
+    self.countDownTimeRoot:SetActive(false)
+    self.finishBtn.gameObject:SetActive(false)
+    self:setVoiceAnim(false)
+
+    if App.IsStudioClient then
+        -- 是studio
+        self.gBtn.gameObject:SetActive(true)
+        self.lBtn.gameObject:SetActive(true)
+    else
+        if self.isToggle then
+            -- 需要纠音
+            self:setLoadingAnim(true, false)
+
+            self:sendNativeStop()
+
+            if self.isDataExceptional then
+                self:checkEvalScore(0)
+                return
+            end
+
+            -- 最长等待*S
+            self.coroutineLoading = self.commonService:StartCoroutine(function()
+                self.commonService:YieldSeconds(RESULT_WAIT_DURATION)
+                self:checkEvalScore(0)
+            end)
+        end
+    end
+end
+
+--- 根据分数展示最终结果
+function FsyncElement:checkEvalScore(score)
+    self:AI_Log("展示分数结果:" .. score)
+
+    if not self.isEvaluating then
+        return
+    end
+
+    self.isEvaluating = false
+
+    if self.mAPIBridge then
+        self.mAPIBridge:UnBind()
+        self.mAPIBridge = nil
+    end
+
+    self:setLoadingAnim(false, false)
+    if self.coroutineLoading then
+        self.commonService:StopCoroutineSafely(self.coroutineLoading)
+        -- cs_coroutine.stop(self.coroutineLoading)
+        self.coroutineLoading = nil
+    end
+    if self.isAward then
+        local cheese = 0
+        local type = -1
+        if score >= self.bigNum then
+            type = 1
+            cheese = 3
+        elseif score < self.bigNum and score >= self.smallNum then
+            type = 2
+            cheese = 2
+        else
+            type = 3
+        end
+        local needRetry = false
+        if self.fightingName then
+            needRetry = true
+        end
+        local callback = function(cheese)
+            -- 延迟3s关闭
+            self.closeCo = self.commonService:StartCoroutine(function()
+                self.commonService:YieldSeconds(2)
+                GameObject.Destroy(self.root)
+                self.VisElement.gameObject:SetActive(false)
+                self:changeOperationState(true)
+
+                if (score >= self.smallNum) then
+                    self.service_observer:Fire(DIALOGUE_AI_FINISH .. self.uniId, {
+                        isPass = true
+                    })
+                else
+                    self.service_observer:Fire(DIALOGUE_AI_FINISH .. self.uniId, {
+                        isPass = false
+                    })
+                end
+            end)
+        end
+
+        local param = {
+            questionId = self.questionId,
+            cheese = cheese,
+            callback = callback,
+            type = type,
+            needRetry = needRetry,
+            isRetry = self.isAgain,
+            isShowAward = true
+        }
+        local ADD_CHEESE_RESULT_TO_SERVICE = "ADD_CHEESE_RESULT_TO_SERVICE"
+        self.service_observer:Fire(ADD_CHEESE_RESULT_TO_SERVICE, param)
+    else
+        -- 大于右值
+        self.greatIcon:SetActive(score >= self.bigNum)
+        -- 在左，右值中间包含左，右值
+        self.goodIcon:SetActive(score < self.bigNum and score >= self.smallNum)
+        if score < self.smallNum then
+            self.fightingIcon:SetActive(score < self.smallNum)
+             --更新反馈
+             if self.isAgain then
+                self.NiceTry:SetActive(score < self.smallNum)
+            else
+                self.TryAgain:SetActive(score < self.smallNum)
+            end
+        end
+        if (score >= self.bigNum) then
+            -- great
+            self.service_audio:PlayClipOneShot(self.greatSound, function()
+
+            end)
+        elseif score < self.bigNum and score >= self.smallNum then
+            -- good
+            self.service_audio:PlayClipOneShot(self.goodSound, function()
+
+            end)
+
+        else
+            -- fighting 小于左值
+            self.service_audio:PlayClipOneShot(self.niceTrySound, function()
+
+            end)
+
+        end
+        -- 延迟3s关闭
+        self.closeCo = self.commonService:StartCoroutine(function()
+            self.commonService:YieldSeconds(1)
+            GameObject.Destroy(self.root)
+            self.VisElement.gameObject:SetActive(false)
+            self:changeOperationState(true)
+
+            if (score >= self.smallNum) then
+                self.service_observer:Fire(DIALOGUE_AI_FINISH .. self.uniId, {
+                    isPass = true
+                })
+            else
+                self.service_observer:Fire(DIALOGUE_AI_FINISH .. self.uniId, {
+                    isPass = false
+                })
+            end
+        end)
+    end
+
+    -- 埋点
+    local type = 0
+    if score > 0 then
+        type = 1
+    end
+    self:reportData("checksound", "", {
+        type = type
+    })
+
+    if not self.isNoSpeak then
+        self:reportData("ai_actual", "实际发音频次", {
+            ai_actual = true
+        })
+    end
+
+    if score >= self.smallNum then
+        -- 结果展示good或者great埋
+        self:reportData("ai_correct", "发音正确频次", {
+            ai_correct = true
+        })
+    end
+
+end
+
+--- 根据返回结果计算分数
+function FsyncElement:getScore(data, notChangeColor)
+    -- 默认句子总分
+    local score = data.total_score
+
+    if data.words == nil or #data.words < 1 then
+        return score
+    end
+    self:AI_Log("【纠音结果返回】" .. table.dump(data.words))
+
+    self.cutOutEIndex = self:getCutOutEIndex(1)
+    -- self:AI_Log("字体变色截取下标  初始值：" .. self.cutOutEIndex)
+
+    local showText = ""
+    if self.cutOutEIndex > 1 then
+        showText = string.sub(self.evalContent, 1, self.cutOutEIndex)
+    end
+
+    -- 大于阈值的单词数量 默认所有单词都大于阈值
+    local passNum = #data.words
+
+    for k, v in pairs(data.words) do
+        if v then
+            local word = v.word
+
+            if v.score < self.passVal then
+                passNum = passNum - 1
+            end
+
+            -- 字体颜色变更
+            local str = self:changeColorWord(word, v.score < self.passVal)
+            showText = showText .. str
+        end
+    end
+
+    if showText == "" then
+        -- 返回结果有问题默认不变色
+        self.evalText.text = self.evalContent
+    else
+        -- 大于阈值单词以及标点符号变色
+        self.evalText.text = "<color=#D6FA05>" .. showText .. "</color>"
+        -- local evalShowText 
+        
+    end
+
+    -- 计算大于阈值单词所占百分比
+    score = math.floor(passNum / (#data.words) * 100)
+    -- self:AI_Log("纠音结果 计算所得分数：" .. score)
+
+    return score
+end
+
+--- 文本变色处理
+function FsyncElement:changeColorWord(s, isRed)
+    -- 单词前确定已经没有标点符号或空格 单词变色
+    local word = s
+    if isRed then
+        -- 白
+        word = "<color=#FFFFFF>" .. s .. "</color>"
+    end
+
+    -- 截取起点
+    local startIndex = self.cutOutEIndex + #s
+    if self.cutOutEIndex > 1 then
+        startIndex = startIndex + 1
+    end
+
+    -- 截取终点
+    self.cutOutEIndex = self:getCutOutEIndex(startIndex)
+
+    -- 截取单词后边的标点符号或空格
+    local punctuation = ""
+    if startIndex <= #self.evalContent and self.cutOutEIndex <= #self.evalContent then
+        punctuation = string.sub(self.evalContent, startIndex, self.cutOutEIndex)
+    end
+
+    -- 拼接单词和标点/空格
+    word = word .. punctuation
+    -- self:AI_Log("标点截取下标  起点:" .. startIndex .. "  终点:" .. self.cutOutEIndex .. "  变色单词:" ..
+    --                 word)
+
+    return word
+end
+
+--- 得到当前截取下标位置
+function FsyncElement:getCutOutEIndex(curIndex)
+    if curIndex > #self.evalContent then
+        return #self.evalContent
+    end
+
+    local index = curIndex
+
+    -- 当前位置是标点往后遍历直到是字母位置返回最后一个标点位置
+    local str = string.sub(self.evalContent, index, index)
+
+    if str and self:isPunctuation(str) and index + 1 <= #self.evalContent then
+        for i = index + 1, #self.evalContent, 1 do
+            if not self:isPunctuation(string.sub(self.evalContent, i, i)) then
+                -- 最后一个标点位置返回
+                return i - 1
+            end
+        end
+
+        return #self.evalContent
+    end
+
+    return index
+end
+
+--- 判断是否为标点符号
+function FsyncElement:isPunctuation(str)
+    -- self:AI_Log("是否为标点或空格：" .. str)
+    -- 英文：逗号、句号、感叹号、空格、问号、下划线、引号  书名号 容错添加中文空格
+    if str == "," or str == "." or str == "?" or str == "!" or str == " " or str == "_" or str == " " or str == ":" or str == "'" or str == "'" or
+        str == "<" or str == ">" or str == [["]] then
+        return true
+    end
+
+    return false
+end
+
+--- 标点符号转换
+function FsyncElement:switchPunctuation(str)
+    return string.gsub(string.gsub(string.gsub(string.gsub(string.gsub(str, "？", "?"), "！", "!"), "。", "."),
+        "，", ","), "：", ":")
+end
+
+--- 返回不要前缀有空格的橘子
+function FsyncElement:getNewSentence(str)
+    for i = 1, #str, 1 do
+        local s = string.sub(str, i, i)
+        if s ~= " " and s ~= " " then
+            return string.sub(str, i)
+        end
+    end
+    return str
+end
+
+--- *******************************************以下为原音音频相关*******************************************
+
+--- 播放音频新函数
+function FsyncElement:playAudio()
+    self:stopAudio()
+    self:showAudioPlayAnim(true)
+    ---@type CS.UnityEngine.AudioSource
+    self.audioSource.clip = self.standardAudio
+    self.audioSource.pitch = self.audioSoursePitch
+    self.audioSource.volume = 1
+    if self.AudioMixer ~=nil then
+        self.AudioMixer:SetFloat("MyExposedParam",1/self.audioSoursePitch)
+    end
+    self.audioSource:Play()
+    self.audioCoroutine = self.commonService:StartCoroutine(function()
+        self.commonService:YieldEndFrame()
+        local audioPitch = PlayerPrefs.GetFloat(DIALOGUE_AI_PITCH, 1)
+        local audioTime =self.standardAudio.length / audioPitch
+        self.commonService:YieldSeconds(audioTime)--/ audioTime)
+        self.isPlayingAudio = false
+        self:showAudioPlayAnim(false)
+        self.cancelMansuBtn.interactable = true
+        self.mansuBtn.interactable = true
+    end)
+end
+
+--- 停止音频新函数
+function FsyncElement:stopAudio()
+
+    if self.audioCoroutine then
+        self.commonService:StopCoroutineSafely(self.audioCoroutine)
+        self.audioCoroutine = nil
+    end
+    self:showAudioPlayAnim(false)
+    self.audioSource:Stop()
+end
+
+--- *******************************************以下调用端上api相关******************************************
+--- 注册监听结果
+function FsyncElement:registerResultListener()
+    if self.isToggle then
+        self:AI_Log("注册监听纠音结果")
+        self.mAPIBridge = APIBridge.CreateService("unity.buss.aispeech.result", "", function(args)
+            -- 避免重复数据
+            if not self.isEvaluating then
+                return
+            end
+            self.isSuccessConnectNative = true
+
+            if args then
+                local data = args.data
+                local status = args.status
+                local noticeType = args.noticeType
+
+                if noticeType == "temp" then
+                    if (data and ((type(data) == "function") or (data.data and type(data.data) == "function"))) or
+                        (not self.needAutoStop) then
+                        return
+                    end
+                    -- 非最终结果
+                    if (data and data.data and data.data.quality and data.data.quality.moderate ~= 0 and self.isNoSpeak) then
+                        self.isNoSpeak = false
+
+                        self:AI_Log("纠音结果返回类型noticeType：temp 音频质量检测正常")
+                    end
+                    if (status == "success" and data.data ~= nil and #data.data.words > 0) then
+                        -- 数据正常计算分数
+                        local score = tonumber(data.data.total_score)
+                        if score >= self.bigNum and data.data.words[#data.data.words].score > 0 and not self.isFinish then
+                            self:onFinish()
+                        end
+                    end
+                    return
+                end
+
+                -- self:AI_Log("纠音结果返回类型noticeType：" .. noticeType .. "  纠音结果 返回status：" ..status)
+
+                if (status == "success") then
+                    if (data.data == nil) then
+                        self:AI_Log("纠音结果 返回data为nil")
+
+                        self.isDataExceptional = true
+                        return
+                    end
+                    local score = tonumber(data.data.total_score)
+                    local wordsScore = self:getScore(data.data)
+                    if wordsScore > score then
+                        score = wordsScore
+                    end
+                    -- 数据正常计算分数
+                    self:checkEvalScore(score)
+
+                    -- 数据上报学习报告
+                    self:sendResult(data)
+                else
+                    self.isDataExceptional = true
+                end
+            else
+                self:AI_Log("纠音结果 args为nil")
+
+                self.isDataExceptional = true
+            end
+        end)
+    end
+end
+
+--- 调用端上开始纠音
+function FsyncElement:sendNativeStart()
+    local requestParam = {
+        id = self.curEvalId,
+        needUploadOss = true,
+        noticeType = "change",
+        bussType = "enEvl",
+        data = {
+            assess_ref = {
+                text = self.evalContent,
+                support_repeat = false
+            },
+            control_param = {
+                vad_max_sec = -1,
+                vad_pause_sec = -1,
+                vad_st_sil_sec = -1,
+                suffix_penal_quick = -1,
+                enable_quality_detect = true
+            }
+        }
+    }
+
+    self:AI_Log("开始调用原生:" .. self.evalShowText)
+    self.isDataExceptional = false
+
+    APIBridge.RequestAsync("app.buss.aispeech.start", requestParam, function(params)
+        if (params) then
+            self:AI_Log("开始调用原生回调数据：" .. table.dump(params))
+        end
+    end)
+end
+
+--- 调用端上结束纠音
+function FsyncElement:sendNativeStop()
+    self:AI_Log("结束调用原生:" .. self.evalShowText)
+
+    APIBridge.RequestAsync("app.buss.aispeech.stop", {
+        id = self.curEvalId
+    }, function(params)
+        if (params) then
+            self:AI_Log("结束调用原生回调数据：" .. table.dump(params))
+        end
+    end)
+end
+
+--- 调用端上取消纠音
+function FsyncElement:sendNativeCancel()
+    self:AI_Log("取消本次测评调用原生:" .. self.evalShowText)
+
+    APIBridge.RequestAsync("app.buss.aispeech.cancel", {}, function(params)
+        if (params) then
+            self:AI_Log("取消本次测评调用原生回调数据:" .. table.dump(params))
+        end
+    end)
+end
+
+--- 调用端上判断权限
+function FsyncElement:sendNativeCheckAuth()
+    APIBridge.RequestAsync("app.auth.checkAuth", {
+        microphoneAuth = true
+    }, function(params)
+        local micAuth = params.microphoneAuth
+        if (micAuth == true) or (micAuth == 1) then
+            self:AI_Log("判断权限-有权限")
+            self:onStart()
+        else
+            self:micAuthStyle(true)
+            self:AI_Log("判断权限-没有权限")
+        end
+    end)
+end
+
+--- 调用端上请求权限
+function FsyncElement:sendNativeRequestAuth()
+    local platform = CS.UnityEngine.Application.platform
+
+    if platform == CS.UnityEngine.RuntimePlatform.Android then
+        APIBridge.RequestAsync("app.auth.requestAuth", {
+            microphoneAuth = true
+        }, function(params)
+            local micAuth = params.microphoneAuth
+            if (micAuth) then
+                self:AI_Log("申请权限-有权限")
+                self:micAuthStyle(false)
+                self:onStart()
+            else
+                self.isInterceptMicTouch = false
+                self:AI_Log("申请权限-没有权限")
+            end
+        end)
+    elseif platform == CS.UnityEngine.RuntimePlatform.IPhonePlayer then
+        APIBridge.RequestAsync("app.api.auth.jumpSetting")
+        self.isInterceptMicTouch = false
+    end
+end
+
+--- *******************************************以下为数据上报学习报告相关*************************************
+function FsyncElement:sendResult(resultData)
+    if App.IsStudioClient then
+        return
+    end
+    self:AI_Log("数据上传学习报告")
+    if self.audioUrl then
+        resultData.audio = self.audioUrl 
+    end
+
+    if self.moduleId and self.moduleId ~= "" and self.enText and self.enText ~= "" and self.chText and self.chText ~= "" then
+        -- self:AI_Log("存储评测数据  中文 " .. self.chText .. " 英文 " .. self.enText .. " 纠音组件id " ..
+        --                 self.moduleId)
+
+        -- 上报到服务器
+        APIBridge.RequestAsync("api.httpclient.request", {
+            ["url"] = "https://app.chuangjing.com/next-api/v1/speak/result-report",
+            ["headers"] = {
+                ["Content-Type"] = "application/json"
+            },
+            ["data"] = {
+                ["course_id"] = tostring(App.CourseId),
+                ["plan_id"] = tostring(App.Info.liveId),
+                ["module_id"] = self.moduleId,
+                ["speak_content_en"] = self.enText,
+                ["speak_content_cn"] = self.chText,
+                ["result_report"] = resultData
+            }
+        }, function(res)
+            if res then
+                self:AI_Log("存储评测数据保存到服务器成功:" .. table.dump(res))
+            end
+        end)
+    end
+end
+
+--- *******************************************以下为数据埋点与数据持久化相关*******************************************
+--- 埋点上报
+function FsyncElement:reportData(id, label, value)
+    if not App.IsStudioClient then
+        NextStudioComponentStatisticsAPI.ComponentStatisticsWithParam(id, "26585", "多媒体", label, "2", value)
+        -- self:AI_Log("埋点上报成功:" .. id)
+    end
+end
+
+--- 是否需要新手引导
+function FsyncElement:isFirstToGuide()
+    -- 本地获取是否满足三次
+    self.countGuide = PlayerPrefs.GetInt(KEY_NEW_GUIDE, 0)
+    return self.countGuide < 3 and PlayerPrefs.GetInt(App.ModName, 0) == 0
+end
+
+--- 本地记录引导mod
+function FsyncElement:setFirstGuide()
+    PlayerPrefs.SetInt(App.ModName, 1)
+    PlayerPrefs.SetInt(KEY_NEW_GUIDE, self.countGuide + 1)
+    PlayerPrefs.Save()
+end
+
+--- 是否原音引导
+function FsyncElement:isFirstToAudioGuide()
+    return PlayerPrefs.GetInt(KEY_AUDIO_GUIDE, 0) == 0
+end
+
+--- 本地记录原音引导
+function FsyncElement:setFirstAudioGuide()
+    PlayerPrefs.SetInt(KEY_AUDIO_GUIDE, 1)
+    PlayerPrefs.Save()
+end
+
+--- 日志上报
+function FsyncElement:AI_Log(var)
+    xpcall(function()
+        g_Log(TAG, var)
+    end, function()
+    end)
+end
+
+function FsyncElement:Exit()
+    FsyncElement.super.Exit(self)
+
+    if self.seq then
+        self.seq:Kill()
+    end
+
+    if self.coroutineVoiceAnim then
+        self.commonService:StopCoroutineSafely(self.coroutineVoiceAnim)
+        -- cs_coroutine.stop(self.coroutineVoiceAnim)
+        self.coroutineVoiceAnim = nil
+    end
+
+    if self.coroutineAudio then
+        self.commonService:StopCoroutineSafely(self.coroutineAudio)
+        -- cs_coroutine.stop(self.coroutineAudio)
+        self.coroutineAudio = nil
+    end
+
+    if self.coroutineAnim then
+        self.commonService:StopCoroutineSafely(self.coroutineAnim)
+        -- cs_coroutine.stop(self.coroutineAnim)
+        self.coroutineAnim = nil
+    end
+
+    if self.showGuideCo then
+        self.commonService:StopCoroutineSafely(self.showGuideCo)
+        -- cs_coroutine.stop(self.showGuideCo)
+        self.showGuideCo = nil
+    end
+
+    if self.coroutineEvaluating then
+        self.commonService:StopCoroutineSafely(self.coroutineEvaluating)
+        -- cs_coroutine.stop(self.coroutineEvaluating)
+        self.coroutineEvaluating = nil
+    end
+
+    if self.coroutineLoading then
+        self.commonService:StopCoroutineSafely(self.coroutineLoading)
+        -- cs_coroutine.stop(self.coroutineLoading)
+        self.coroutineLoading = nil
+    end
+
+    if self.closeCo then
+        self.commonService:StopCoroutineSafely(self.closeCo)
+        -- cs_coroutine.stop(self.closeCo)
+        self.closeCo = nil
+    end
+
+    if self.coroutineStartLoading then
+        self.commonService:StopCoroutineSafely(self.coroutineStartLoading)
+        -- cs_coroutine.stop(self.coroutineStartLoading)
+        self.coroutineStartLoading = nil
+    end
+
+    if self.audioCoroutine then
+
+        self.commonService:StopCoroutineSafely(self.audioCoroutine)
+        -- cs_coroutine.stop(self.coroutineStartLoading)
+
+        self.audioCoroutine = nil
+    end
+
+    if self.toastCoroutine then
+        self.commonService:StopCoroutineSafely(self.toastCoroutine)
+        self.toastCoroutine = nil
+    end
+end
+
+--- *******************************************以下基类重写方法*********************************************
+-- 收到/恢复IRC消息
+-- @param key  订阅的消息key
+-- @param value  消息集合体
+-- @param isResume  是否为恢复消息
+function FsyncElement:ReceiveMessage(key, value, isResume)
+end
+
+-- 发送KEY-VALUE 消息
+-- @param key 自定义/协议key
+-- @param body  table 消息体
+function FsyncElement:SendCustomMessage(key, body)
+    self:SendMessage(key, body, 0)
+end
+
+-- 自己avatar对象创建完成
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:SelfAvatarCreated(avatar)
+end
+
+-- 自己avatar对象人物模型加载完成ba
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:SelfAvatarPrefabLoaded(avatar)
+end
+
+-- avatar对象创建完成，包含他人和自己
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:AvatarCreated(avatar)
+end
+
+------------------------蓝图组件相应方法---------------------------------------------
+-- 是否是异步恢复如果是需要改成true
+function FsyncElement:LogicMapIsAsyncRecorver()
+    return false
+end
+
+-- 开始恢复方法（断线重连的时候用）
+function FsyncElement:LogicMapStartRecover()
+    FsyncElement.super:LogicMapStartRecover()
+    -- TODO
+end
+
+-- 结束恢复方法 (断线重连的时候用)
+function FsyncElement:LogicMapEndRecover()
+    FsyncElement.super:LogicMapEndRecover(self)
+    -- TODO
+end
+
+-- 所有的组件恢复完成
+function FsyncElement:LogicMapAllComponentRecoverComplete()
+end
+
+-- 收到Trigger事件
+function FsyncElement:OnReceiveTriggerEvent(interfaceId)
+end
+
+-- 收到GetData事件
+function FsyncElement:OnReceiveGetDataEvent(interfaceId)
+    return nil
+end
+
+------------------------蓝图组件相应方法End---------------------------------------------
+
+return FsyncElement

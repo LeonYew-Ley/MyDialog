@@ -1,0 +1,711 @@
+---
+---  Author: 【艾延波】
+---  AuthorID: 【273354】
+---  CreateTime: 【2022-10-17 17:06:34】
+--- 【FSync】
+--- 【对话卡】
+---
+local class = require("middleclass")
+local WBElement = require("mworld/worldBaseElement")
+local DOTween = CS.DG.Tweening.DOTween
+---@class fsync_7ae7a2fa_c143_4a92_8c46_84c1b2ce0cd0 : WorldBaseElement
+---@field state DialogState 状态
+---@field flag number 标志数字
+---@field uniId string 数字
+---
+---@field maxNameLen number 名字数量
+---@field maxGoonTextLen number 继续按钮文字数量
+---
+---@field isHiddenOperation number 是否隐藏操作面板
+---@field name string 名字
+---@field text string 文本
+---@field goonType number 下一步类型。
+---@field sortingOrder number layer的层级
+---@field audio table 音频信息
+---@field icon table 图片信息
+---@field countDownTimer number 倒计时时长
+---@field goonButtonText string 倒计时时长
+---@field hasTriggerAudioFinlish  boolean 已经触发过音频播放完
+---@field hasSetUpData boolean 已经初始化了数据
+local FsyncElement = class("fsync_7ae7a2fa-c143-4a92-8c46-84c1b2ce0cd0", WBElement)
+
+---@class DialogState
+local DialogState = {
+    Init = 0,
+    Speaking = 1,
+}
+---@type CS.UnityEngine.PlayerPrefs
+local PlayerPrefs = CS.UnityEngine.PlayerPrefs
+
+function FsyncElement:GetCurrentFileName()
+    --debug.getinfo()
+   local info = debug.getinfo(2,"S")
+   local path = info.source
+   local result = string.split(path,"/")
+   local name = result[#result]
+   name = string.gsub(name,".lua","")
+   return name
+end
+
+---@param worldElement CS.Tal.framesync.WorldElement
+function FsyncElement:initialize(worldElement)
+    FsyncElement.super.initialize(self, worldElement)
+    self.commonService = App:GetService("CommonService")
+    --订阅KEY消息
+    self.hasSetUpData = false
+    self.hasTriggerAudioFinlish = false
+    self.state = DialogState.Init
+
+
+    self.uniId = tostring(self.VisElement.gameObject:GetInstanceID())
+    if not self.uniId then
+        g_LogError("forping:Dialog:找不到uniId",self.name)
+    end
+
+    self:RegisterHanlder()
+    
+    self.subscribeKey = "Dialog.SubsrcibeKey,"..App.Uuid.."___"..self:GetCurrentFileName()
+
+    self:SubscribeMsgKey(self.subscribeKey)
+end
+
+function FsyncElement:Exit()
+    self:StopAudio(false)
+    FsyncElement.super.Exit(self)
+end
+
+function FsyncElement:SetUpData()
+    if self.hasSetUpData then
+        return
+    end
+    self.hasSetUpData = true
+
+    local configService = CourseEnv.ServicesManager:GetConfigService()
+    self.jsonService = CourseEnv.ServicesManager.GetJsonService()
+
+    self.maxNameLen = 10
+    self.maxGoonTextLen = 8
+
+    local nameStr = configService:GetConfigValueByConfigKey(self.VisElement,"name")
+    if nameStr then
+        local studentName = App.Properties.AvatarName
+        nameStr = string.gsub(nameStr, "#_username_#", studentName)
+    end
+
+    self.name = self:SubStrForMaxNum(nameStr,10)
+    self.text = configService:GetConfigValueByConfigKey(self.VisElement,"text")
+    self.goonType = tonumber(configService:GetConfigValueByConfigKey(self.VisElement,"goonType")) or 0
+    -- self.goonType = tonumber(configService:GetConfigValueByConfigKey(self.VisElement,"goonType")) or 0
+    self.countDownTimer = configService:GetConfigValueByConfigKey(self.VisElement,"countDownTimer")
+    self.goonButtonText = configService:GetConfigValueByConfigKey(self.VisElement,"goonButtonText")
+    
+   
+
+    local audioStr = configService:GetConfigValueByConfigKey(self.VisElement,"audio")
+    local iconStr = configService:GetConfigValueByConfigKey(self.VisElement,"icon")
+    local imageContentStr = configService:GetConfigValueByConfigKey(self.VisElement,"imageContent")
+
+
+    local isHiddenOperationStr = configService:GetConfigValueByConfigKey(self.VisElement,"isHiddenOperation")
+    if isHiddenOperationStr == "True" then
+        self.isHiddenOperation = true
+    else
+        self.isHiddenOperation = false
+    end
+
+    self.audio = {}
+    if audioStr and audioStr ~= "" then
+        self.audio = self.jsonService:decode(audioStr)
+    end
+    self.imageContent = {}
+    if imageContentStr and imageContentStr ~= ""  then
+        self.imageContent = self.jsonService:decode(imageContentStr)
+    end
+
+    self.icon = {}
+    if iconStr and imageContentStr ~= "" then
+        self.icon = self.jsonService:decode(iconStr)
+    end
+    self.sortingOrder = 1000
+
+    -- 翻译
+    self.fanyiText = configService:GetConfigValueByConfigKey(self.VisElement,"fanyiText")
+    local hasFanyiStr = configService:GetConfigValueByConfigKey(self.VisElement,"hasFanyi")
+    if hasFanyiStr == "True" then
+        self.hasFanyi = true
+    else
+        self.hasFanyi = false
+    end
+    -- 重听
+    local showReplayStr = configService:GetConfigValueByConfigKey(self.VisElement,"showReplay")
+    if showReplayStr == "True" then
+        self.showReplay = true
+    else
+        self.showReplay = false
+    end
+
+    -- 正面对话
+    self.modelName = tostring(configService:GetConfigValueByConfigKey(self.VisElement,"modelName"))
+     -- 是否正面对话
+     local isFaceSpeakStr = configService:GetConfigValueByConfigKey(self.VisElement,"isFaceSpeak")
+     if isFaceSpeakStr == "True" then
+        self.isFaceSpeak = true
+    else
+        self.isFaceSpeak = false
+    end
+
+    -- 是否播放TTS语音
+    local isTTS = configService:GetConfigValueByConfigKey(self.VisElement,"isTTSAudio")
+    self.isTTSAudio = isTTS == "True" and true or false
+    self.speechType = configService:GetConfigValueByConfigKey(self.VisElement,"speechType")
+
+end
+
+function FsyncElement:RegisterHanlder()
+    local observerService = CourseEnv.ServicesManager:GetObserverService()
+    observerService:Watch("Dialog.Panel.ClickGoOnButton"..self.uniId, function()
+        g_Log("forping:Dialog:点击了继续按钮")
+        self:StopDialog()
+    end)
+
+    observerService:Watch("Dialog.Panel.ClickReplayButton"..self.uniId, function(key, args)
+        
+        local type = tonumber(args[0]) or 0
+        g_Log("forping:Dialog:点击了重播按钮 ", tostring(type))
+        self:DealClickReplayButtonEvent(type)
+    end)
+    observerService:Watch("Dialog.Panel.ReplayGuidePlayFinlish"..self.uniId, function(key, args)
+        self:StopReplayGuide()
+    end)
+end
+
+function FsyncElement:StartDialog(sendTrigger)
+    if self.state == DialogState.Speaking then
+        return
+    end
+    self.state = DialogState.Speaking
+    self:StartCurrentDiologSpeek()
+
+    self:SendCurrentIndexAndStateToService()
+    g_Log("forping:Dialog:发起了 showAction 的Trigger")
+    if sendTrigger then
+        self:Trigger("showAction")
+    end
+end
+
+function FsyncElement:StopDialog()
+    if self.isHiddenOperation then
+        self:ChangeOperationState(true)
+    end
+
+    if self.state ~= DialogState.Speaking then
+        return
+    end
+    self:StopAudio(true)
+    
+    self.state = DialogState.Init
+    
+    local observerService = CourseEnv.ServicesManager:GetObserverService()
+    
+    observerService:Fire("Dialog.Panel.HiddenSpeek"..self.uniId)
+
+    self:SendCurrentIndexAndStateToService()
+    g_Log("forping:Dialog:发起了 hiddenAction 的Trigger")
+    self:Trigger("hiddenAction")
+end
+
+function FsyncElement:StartCurrentDiologSpeek()
+    g_Log("forping:Dialog:开始展示对话")
+    self:SetUpData()
+
+    if self.isHiddenOperation then
+        self:ChangeOperationState(false)
+    end
+
+    local observerService = CourseEnv.ServicesManager:GetObserverService()
+
+    local param = {}
+    -- 直接有对应关系的。赋值
+    param.name = self.name
+    param.icon = self.icon.uAddress
+    param.text = self.text
+
+    if param.text then
+        local studentName = App.Properties.AvatarName
+        param.text = string.gsub(param.text, "#_username_#", studentName)
+    end
+
+    param.imageContent = self.imageContent.uAddress
+
+    param.goonType = tonumber(self.goonType)
+    param.countDownTimer = tonumber(self.countDownTimer) or 5
+    param.goonTitle = self.goonButtonText
+    param.goonTitle = self:SubStrForMaxNum(param.goonTitle,self.maxGoonTextLen)
+    if not param.goonTitle or param.goonTitle == "" then
+        param.goonTitle = "点击继续"
+    end
+
+    --翻译
+    param.fanyiText = self.fanyiText
+    param.hasFanyi = self.hasFanyi
+
+    param.sortingOrder = self.sortingOrder
+    param.Script = self.VisElement
+
+    -- 处理语音播放和倒计时
+    local audioName = self.audio.uAddress
+    param.audioName = audioName
+
+    local hasAudio = self:StartAudioWithName(param.audioName,true,param)
+
+    param.showReplay = self.showReplay
+    if not hasAudio or param.goonType == 1 then
+        param.showReplay = false
+    end
+
+    -- 面对面
+    if self.isFaceSpeak and self.modelName then
+        local npcgo = CourseEnv.ServicesManager:GetAssetService():FindAllInWorkSpaceWithName(self.modelName)
+        if npcgo then
+            ---@type CS.UnityEngine.Transform
+            local npcTransform = npcgo.transform
+            local avatar = CourseEnv.ServicesManager:GetAvatarService().selfAvatar
+            if avatar then
+                ---@type CS.UnityEngine.Transform
+                local avatarTransform = avatar.VisElement.gameObject.transform
+                local dir = avatarTransform.position - npcTransform.position;
+                dir.y = 0
+                npcTransform.rotation = CS.UnityEngine.Quaternion.LookRotation(dir)
+            end
+        end
+    end
+
+
+    observerService:Fire("FirstDialogSpeek.Panel.ShowSpeek"..self.uniId,{data = param})
+    
+    if not hasAudio then
+        self:DealNotHaveAuido(param)
+    end
+end
+
+
+local DialogGuidePlayerPrefsKey = "DialogGuidePlayerPrefsKey"
+---@public 处理音频播放完成
+function FsyncElement:DealGoonButtonAndReplsyGuideStateWhenAuidoPlayFinlish(param)
+    g_Log("forping:Dialog.DealGoonButtonAndReplsyGuideStateWhenAuidoPlayFinlish")
+
+    local observerService = CourseEnv.ServicesManager:GetObserverService()
+    
+    if param.showReplay then
+        local userDialogGuidePlayerPrefsKey = tostring(App.Info.userId) .. DialogGuidePlayerPrefsKey
+        local savedValue = PlayerPrefs.GetInt(userDialogGuidePlayerPrefsKey, 0)
+        if savedValue == 0 then
+        -- if savedValue == 0 or savedValue == 1 then
+            PlayerPrefs.SetInt(userDialogGuidePlayerPrefsKey, 1)
+            PlayerPrefs.Save()
+            
+            observerService:Fire("Dialog.Panel.ShowReplayGuide"..self.uniId)
+
+            return
+        end
+    end
+    
+    local goonButtonInfo = {}
+    
+    goonButtonInfo.goonTitle = param.goonTitle;
+    goonButtonInfo.countDownTimer = param.countDownTimer;
+    
+    if param.goonType == 0 then
+        goonButtonInfo.hasCountDown = false
+        observerService:Fire("Dialog.Panel.ShowGoonButton"..self.uniId,goonButtonInfo)
+    elseif param.goonType == 1 then
+        self:StopDialog()
+    elseif param.goonType == 2 then
+        goonButtonInfo.hasCountDown = true
+        observerService:Fire("Dialog.Panel.ShowGoonButton"..self.uniId,goonButtonInfo)
+    end
+end
+---@public 处理没有音频
+function FsyncElement:DealNotHaveAuido(param)
+    g_Log("forping:Dialog:DealNotHaveAuido")
+    local observerService = CourseEnv.ServicesManager:GetObserverService()
+    
+    local goonButtonInfo = {}
+    goonButtonInfo.goonTitle = param.goonTitle;
+    goonButtonInfo.countDownTimer = param.countDownTimer;
+    if param.goonType == 2 then
+        goonButtonInfo.hasCountDown = true
+    else
+        goonButtonInfo.hasCountDown = false
+    end
+    observerService:Fire("Dialog.Panel.ShowGoonButton"..self.uniId,goonButtonInfo)
+end
+
+
+function FsyncElement:StartAudioWithName(audioName,sendEndTrigger,param)
+    local audioClip = nil
+    if audioName and audioName ~="" then
+        -- 播放音频
+        ---@type AudioClip
+         audioClip = CourseEnv.ServicesManager:GetAssetService():GetConfigGameObjectWithUAddress(self.VisElement,audioName)
+        if not audioClip then return false end
+        self:PlayAudioClip(audioClip,sendEndTrigger,param)
+        return true  
+    else
+        if self.isTTSAudio then
+            self:RequestTextToSpeech(param.text,function()end,function(rs,clip)
+                if not rs then return false end
+                self:PlayAudioClip(clip,sendEndTrigger,param)
+                return true  
+            end)
+        else
+            return false
+        end
+    end
+end
+
+function FsyncElement:PlayAudioClip(audioClip,sendEndTrigger,param)
+    local observerService = CourseEnv.ServicesManager:GetObserverService()
+
+    self:StopAudio(false)
+    self.audioCoroutine = self.commonService:StartCoroutine(function()
+        self.commonService:YieldEndFrame()
+        observerService:Fire("Dialog.Panel.PlayAudioClip" .. self.uniId, audioClip)
+        self.commonService:YieldSeconds(audioClip.length)
+        self:StopAudio(sendEndTrigger)
+        -- 重听按钮可以点击
+        observerService:Fire("Dialog.Panel.ChangeReplayButtonState" .. self.uniId, "Normal")
+        if param then
+            self:DealGoonButtonAndReplsyGuideStateWhenAuidoPlayFinlish(param)
+        end
+    end)
+end
+
+---@public 停止播放音频
+---@param sendEndTrigger boolean 是否发送trigger
+function FsyncElement:StopAudio(sendEndTrigger)
+    g_Log("forping.Dialog.StopAudio:")
+    if self.audioCoroutine then
+        local observerService = CourseEnv.ServicesManager:GetObserverService()
+        if observerService then
+            observerService:Fire("Dialog.Panel.StopAudioSource"..self.uniId)
+        end
+        if sendEndTrigger and not self.hasTriggerAudioFinlish then
+            g_Log("forping.选项对话.Controller:发起了 audioPlayFinlishAction 的Trigger")
+            self.hasTriggerAudioFinlish = true
+            self:SendCurrentIndexAndStateToService()
+            self:Trigger("audioPlayFinlishAction")
+        end
+        self.commonService:StopCoroutineSafely(self.audioCoroutine)
+        self.audioCoroutine = nil
+    end
+end
+
+-- 结束重听引导
+function FsyncElement:StopReplayGuide()
+    g_Log("forping.Dialog.StopReplayGuide:")
+    -- 展示点击继续按钮
+    local observerService = CourseEnv.ServicesManager:GetObserverService()
+    observerService:Fire("Dialog.Panel.ReplayGuideDone"..self.uniId)
+
+    local param = {}
+   
+    param.goonType = tonumber(self.goonType)
+    param.countDownTimer = tonumber(self.countDownTimer) or 5
+    param.goonTitle = self.goonButtonText
+    param.goonTitle = self:SubStrForMaxNum(param.goonTitle,self.maxGoonTextLen)
+    if not param.goonTitle or param.goonTitle == "" then
+        param.goonTitle = "点击继续"
+    end
+    self:DealGoonButtonAndReplsyGuideStateWhenAuidoPlayFinlish(param)
+end
+
+
+function FsyncElement:DealClickReplayButtonEvent(type)
+    local observerService = CourseEnv.ServicesManager:GetObserverService()
+    if type == 1 then
+        self:StopReplayGuide()
+    end
+    if self.audioCoroutine then
+        self:StopAudio(false)
+        observerService:Fire("Dialog.Panel.ChangeReplayButtonState"..self.uniId, "Normal")
+    else
+        self:StartAudioWithName(self.audio.uAddress)
+        observerService:Fire("Dialog.Panel.ChangeReplayButtonState"..self.uniId, "Selected")
+    end
+
+end
+
+
+---@public 修改UI面板
+function FsyncElement:ChangeOperationState(show)
+    g_Log("forping:Dialog:ChangeOperationState:",tostring(show))
+    local joystickService = CourseEnv.ServicesManager.GetJoystickService()
+    local UIService = CourseEnv.ServicesManager:GetUIService()
+    if show  then
+        UIService:showCommonMenu()
+        if self.hideJumpId then
+            joystickService:setVisibleJumpWithID(self.hideJumpId)
+        end
+        if self.hideJoyId then
+            joystickService:setVisibleJoyWithID(self.hideJoyId)
+        end
+        -- joystickService:hidenJoyAndJump(false)
+    else
+        UIService:hidenCommonMenu()
+        self.hideJumpId = joystickService:setHidenJumpWithID()
+        self.hideJoyId = joystickService:setHidenJoyWithID()
+        -- joystickService:hidenJoyAndJump(true)
+    end
+end
+
+------------------------IRC消息---------------------------------------------
+-- 收到/恢复IRC消息
+-- @param key  订阅的消息key
+-- @param value  消息集合体
+-- @param isResume  是否为恢复消息
+function FsyncElement:ReceiveMessage(key, value, isResume)
+    if key == self.subscribeKey and isResume then
+        local jsonService = CourseEnv.ServicesManager:GetJsonService()
+        local dataStr = value[#value]
+
+        g_Log("forping:Dialog:ReceiveMessage:恢复状态同步指令 ",key,dataStr)
+
+        local data = jsonService:decode(dataStr)
+        
+        self.hasTriggerAudioFinlish = data.hasTriggerAudioFinlish or false
+        if data.state == DialogState.Speaking then
+            self:StartDialog(false)
+        end
+    end
+end
+
+-- 发送KEY-VALUE 消息 
+-- @param key 自定义/协议key
+-- @param body  table 消息体
+function FsyncElement:SendCurrentIndexAndStateToService()
+    local fsyncData = {state = self.state,hasTriggerAudioFinlish = self.hasTriggerAudioFinlish}
+    g_Log("forping:Dialog:ReceiveMessage:同步状态 ",table.dump(fsyncData), " ",self.subscribeKey)
+    self:SendMessage(self.subscribeKey,fsyncData)
+end
+
+
+------------------------蓝图组件相应方法---------------------------------------------
+--收到Trigger事件
+function FsyncElement : OnReceiveTriggerEvent(interfaceId)
+    g_Log("forping:Dialog:收到了trigger : ",interfaceId)
+    if interfaceId == "show" then
+        self.hasTriggerAudioFinlish = false
+        self:StartDialog(true);
+    elseif interfaceId  == "hidden" then
+        self:StopDialog();
+    end
+end
+
+--是否是异步恢复如果是需要改成true
+function FsyncElement:LogicMapIsAsyncRecorver()
+    return false
+end
+--开始恢复方法（断线重连的时候用）
+function FsyncElement:LogicMapStartRecover()
+    FsyncElement.super:LogicMapStartRecover()
+    --TODO
+end
+--结束恢复方法 (断线重连的时候用)
+function FsyncElement:LogicMapEndRecover()
+    FsyncElement.super:LogicMapEndRecover(self)
+    --TODO
+end
+--所有的组件恢复完成
+function FsyncElement:LogicMapAllComponentRecoverComplete()
+end
+
+--收到GetData事件
+function FsyncElement : OnReceiveGetDataEvent(interfaceId)
+    return nil
+end
+------------------------蓝图组件相应方法End---------------------------------------------
+
+--- 字符串处理
+-- 截取字串，传入最大个数
+function FsyncElement:SubStrForMaxNum(str,max)
+    local curStr = tostring(str)
+    local len = self:GetStringLength(curStr)
+
+    if len <= max then
+        return curStr
+    end
+
+    local result = self:StringSub(curStr,1,max) 
+
+    return result
+end
+
+-- 获取字串长度
+function FsyncElement:GetStringLength(inputstr)
+    if not inputstr or type(inputstr) ~= "string" or #inputstr <= 0 then  --inputstr不为nil、类型为字符串、且长度不为0
+        return 0
+    end
+    local length = 0  -- 字符的个数
+    local i = 1       
+    while true do     
+        local curByte = string.byte(inputstr, i)  --获取单个字节的ASCII码
+        local byteCount = 1                       --单个字符的字节数，根据ASCII判断字节数
+        if curByte > 239 then
+            byteCount = 4  -- 4字节字符
+        elseif curByte > 223 then
+            byteCount = 3  -- 汉字，3字节
+        elseif curByte > 128 then
+            byteCount = 2  -- 双字节字符
+        else
+            byteCount = 1  -- 单字节字符
+        end
+
+        i = i + byteCount
+        length = length + 1
+        if i > #inputstr then
+            break
+        end
+    end
+    return length          --返回字符个数
+end
+
+
+-- 截取字串
+function FsyncElement:StringSub(str, startIndex, endIndex)
+    local tempStr = str 
+    local byteStart = 1 -- string.sub截取的开始位置
+    local byteEnd = -1 -- string.sub截取的结束位置
+    local index = 0  -- 字符记数
+    local bytes = 0  -- 字符的字节记数
+ 
+    startIndex = math.max(startIndex, 1)
+    endIndex = endIndex or -1
+    while string.len(tempStr) > 0 do     
+       if index == startIndex - 1 then
+          byteStart = bytes+1;
+       elseif index == endIndex then
+          byteEnd = bytes;
+          break;
+       end
+       bytes = bytes + self:getBytes(tempStr)
+       tempStr = string.sub(str, bytes+1)
+ 
+       index = index + 1
+    end
+    return string.sub(str, byteStart, byteEnd)
+end
+
+--  得到字符
+function FsyncElement:getBytes(char)
+    if not char then
+       return 0
+    end
+    local code = string.byte(char)
+    if code < 127 then
+       return 1
+    elseif code <= 223 then
+       return 2
+    elseif code <= 239 then
+       return 3
+    elseif code <= 247 then
+       return 4
+    else
+       -- 讲道理不会走到这里^_^
+       return 0
+    end
+ end
+
+
+
+ -- 文本转语音
+function FsyncElement:RequestTextToSpeech(text,startCallback,callback)
+    self.isStop = false
+    self:Print("发送文本给TTS服务器，text：" .. text .. ",voice_name:" .. self.speechType)
+        local params = {
+            ["text"] = text,
+            ["voice_name"] = self.speechType,
+            ["speed"] = 70,
+            ["volume"] = 50,
+            ["pitch"] = 50,
+        }
+        self:Print("发送文本给TTS服务器，" .. table.dump(params))
+        APIBridge.RequestAsync('api.httpclient.request',{
+            ["url"] = "http://app.chuangjing.com/next-api/v1/text-to-speech",
+            ["headers"] = {["Content-Type"]="application/json"},
+            ["data"] = params
+        }, function(res)
+            if self.isStop then
+                self:Print("收到TTS url结果，但tts服务已经被停止，忽略本次结果")
+                return
+            end
+            if res and res.responseString and (not self.isStop) then
+                local response = self.jsonService:decode(res.responseString)
+                if response and response.msg == "success" and response.data.audio_url then
+                    local audioUrl = response.data.audio_url
+                    self:Print("收到TTS服务请求结果：" .. audioUrl)
+                    self:GetMp3AudioFromGetUrl(audioUrl, function()
+                        -- 下载audio失败
+                        callback(false)
+                    end, function(clip)
+                        if self.isStop then
+                        self:Print("下载audioClip成功，但tts服务已经被停止，忽略本次播放")
+                            return
+                        end
+                        self:Print("下载audioClip成功")
+                        -- self.audioSource = self.audioService:PlayClipOneShot(clip)
+                        callback(true,clip)
+                    end)    
+                else
+                    self:Print("收到TTS服务请求结果, 但没有找到audio_url"..table.dump(res))
+                    callback(false)
+                end
+    
+            else
+                self:Print("收到TTS服务请求结果,但结果数据异常"..table.dump(res))
+                callback(false)
+            end
+        end)
+end
+
+---@public
+---通过url获取audioclip
+---@param clipUrl string
+---@param failedCallback fun(err:string):void
+---@param loadCallback fun(clip:AudioSource):void
+function FsyncElement:GetMp3AudioFromGetUrl(clipUrl,failedCallback,loadCallback)
+    self:GetAudioFromGetUrl(clipUrl,CS.UnityEngine.AudioType.MPEG,failedCallback,loadCallback);
+end
+---@public
+---通过url获取audioclip
+---@param clipUrl string
+---@param audioType CS.UnityEngine.AudioType
+---@param failedCallback fun(err:string):void
+---@param loadCallback fun(clip:AudioSource):void
+function FsyncElement:GetAudioFromGetUrl(clipUrl,audioType,failedCallback,loadCallback)
+    self.commonService:StartCoroutine(function()
+        local audioReq = CS.UnityEngine.Networking.UnityWebRequestMultimedia.GetAudioClip(clipUrl,audioType);
+        self.commonService:Yield(audioReq:SendWebRequest())
+        if audioReq.isNetworkError or audioReq.isHttpError then
+            if failedCallback then
+                failedCallback(audioReq.error)
+            end
+        else
+            if loadCallback then
+                local clip = CS.UnityEngine.Networking.DownloadHandlerAudioClip.GetContent(audioReq)
+                loadCallback(clip)
+            end
+        end
+    end)
+end
+
+-- 打印信息
+function FsyncElement:Print(...)
+    g_Log("对话卡",...)
+end
+
+
+
+return FsyncElement
+ 
+

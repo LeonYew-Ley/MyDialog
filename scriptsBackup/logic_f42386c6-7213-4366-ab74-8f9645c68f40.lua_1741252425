@@ -1,0 +1,21 @@
+---
+---  Author: 【黎恩瑜】
+---  AuthorID: 【387657】
+---  CreateTime: 【2025-3-6 17:13:41】
+--- 【Logic】
+--- 【SetSpawn】
+
+local class = require("middleclass")
+local LogicScript = require("studios/logicscript")
+
+---@class logic_f42386c6_7213_4366_ab74_8f9645c68f40 : LogicScript
+local LogicElement  = class("logic_f42386c6-7213-4366-ab74-8f9645c68f40",LogicScript)
+
+---@param script CS.Tal.EngineExtends.StudioExtends.LogicScript
+function LogicElement : initialize(script)
+    LogicElement.super.initialize(self,script)
+end
+
+
+return LogicElement
+

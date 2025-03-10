@@ -1,0 +1,207 @@
+---
+---  Author: 【谢炜航】
+---  AuthorID: 【171069】
+---  CreateTime: 【2023-8-1 19:31:45】
+--- 【FSync】
+--- 【3D空对象】
+---
+
+local class = require("middleclass")
+local WBElement = require("mworld/worldBaseElement")
+
+local SelfState = {
+    NotInit = -1,
+    Closed = 0,
+    WaitingForTrigger = 1,
+    Triggered = 2
+}
+
+---@class fsync_801fe68d_3370_44e5_ae5c_06aa7b20ed8e : WorldBaseElement
+local FsyncElement = class("fsync_801fe68d-3370-44e5-ae5c-06aa7b20ed8e", WBElement)
+
+
+---@param worldElement CS.Tal.framesync.WorldElement
+function FsyncElement:initialize(worldElement)
+    FsyncElement.super.initialize(self, worldElement)
+    --订阅KEY消息
+
+    self.syncKey = self.class.name..App.Uuid..'_v1'
+    self:SubscribeMsgKey(self.syncKey)
+
+    self.status = SelfState.NotInit
+
+    self.isOn = self.configHandler:GetStringByConfigKey("isOpen") == "True"
+
+
+    self.visTriggerCount = 0
+    -- 隐藏看得见的模型
+    local areaBoxList = {}
+    self.areaBoxList = areaBoxList
+    for i = 0, self.VisElement.transform.childCount - 1 do
+        local child = self.VisElement.transform:GetChild(i)
+        -- 在这里处理子物体
+        if not IsNull(child) then
+            table.insert(self.areaBoxList, child.gameObject)
+            child.gameObject:SetActive(true)
+            GameObject.Destroy(child.gameObject.transform:Find("Asset").gameObject)
+        end
+        g_Log('区域触发器初始化物体'..child.name)
+    end
+end
+
+function FsyncElement:UpdateStatusAndNotify(status)
+    self.status = status
+    self:SendMessage(self.syncKey, {status = status})
+end
+
+function FsyncElement:RawEnter()
+    if self.status == SelfState.WaitingForTrigger then
+        self:UpdateStatusAndNotify(SelfState.Triggered)
+        self:Trigger("gameObj1_in")
+        g_Log("区域触发器Trigger gameObj1_in")
+    end
+end
+function FsyncElement:OnCollderEnter()
+    self.visTriggerCount = self.visTriggerCount + 1
+    g_Log("区域触发器OnCollderEnter"..tostring(self.status)..tostring(self.visTriggerCount))
+    self:RawEnter()
+end
+function FsyncElement:OnColliderExit()
+    self.visTriggerCount = self.visTriggerCount - 1
+    g_Log("区域触发器OnColliderExit"..tostring(self.status)..tostring(self.visTriggerCount))
+    if self.status == SelfState.Triggered then
+        if self.visTriggerCount <= 1 then
+            self.visTriggerCount = 0
+            self:UpdateStatusAndNotify(SelfState.WaitingForTrigger)
+            self:Trigger("gameObj1_out")
+            g_Log("区域触发器Trigger gameObj1_out")
+        end
+    end
+end
+-- 收到/恢复IRC消息
+-- @param key  订阅的消息key
+-- @param value  消息集合体
+-- @param isResume  是否为恢复消息
+function FsyncElement:ReceiveMessage(key, value, isResume)
+    -- TODO:
+    if not isResume then
+        return
+    end
+    if key == self.syncKey then
+        local msg = CourseEnv.ServicesManager:GetJsonService():decode(value[#value])
+
+        local remoteStatus  = msg.status
+        self.status = remoteStatus
+        g_Log("区域恢复状态 resume msg"..tostring(self.status))
+    end
+end
+
+-- 发送KEY-VALUE 消息 
+-- @param key 自定义/协议key
+-- @param body  table 消息体
+function FsyncElement:SendCustomMessage(key, body)
+    self:SendMessage(key,body)
+end
+
+-- 自己avatar对象创建完成
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:SelfAvatarCreated(avatar)
+
+end
+
+-- 自己avatar对象人物模型加载完成ba
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:SelfAvatarPrefabLoaded(avatar)
+
+end
+
+-- avatar对象创建完成，包含他人和自己
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:AvatarCreated(avatar)
+
+end
+
+------------------------蓝图组件相应方法---------------------------------------------
+--是否是异步恢复如果是需要改成true
+function FsyncElement:LogicMapIsAsyncRecorver()
+    return false
+end
+--开始恢复方法（断线重连的时候用）
+function FsyncElement:LogicMapStartRecover()
+    FsyncElement.super:LogicMapStartRecover()
+    --TODO
+end
+--结束恢复方法 (断线重连的时候用)
+function FsyncElement:LogicMapEndRecover()
+    FsyncElement.super:LogicMapEndRecover(self)
+
+end
+--所有的组件恢复完成
+function FsyncElement:LogicMapAllComponentRecoverComplete()
+    if SelfState.NotInit == self.status then
+        if self.isOn then
+            -- 只有未初始化过 才走这里
+            self.status = SelfState.WaitingForTrigger
+        else
+            self.status = SelfState.Closed
+        end
+    end
+
+
+    g_Log("组件结束恢复，区域触发器激活碰撞体"..tostring(self.isOn)..tostring(self.status))
+    for i = 1, #self.areaBoxList do
+        local areaBox = self.areaBoxList[i]
+        -- 在这里处理数组中的元素
+        CourseEnv.ServicesManager:GetColliderService():RegisterColliderEnterListener(areaBox, function(other)
+            local AvatarService = App:GetService("Avatar")
+            self.selfAvatar = AvatarService:GetAvatarByUUID(App.Uuid)
+            if IsNull(self.selfAvatar) then
+                return
+            end
+            if other.name == self.selfAvatar.VisElement.gameObject.name then
+                self:OnCollderEnter()
+            end
+        end)
+        CourseEnv.ServicesManager:GetColliderService():RegisterColliderExitListener(areaBox, function(other)
+            local AvatarService = App:GetService("Avatar")
+            self.selfAvatar = AvatarService:GetAvatarByUUID(App.Uuid)
+            if IsNull(self.selfAvatar) then
+                return
+            end
+            if other.name == self.selfAvatar.VisElement.gameObject.name then
+                self:OnColliderExit()
+            end
+        end)
+    end
+
+end
+
+--收到Trigger事件
+function FsyncElement:OnReceiveTriggerEvent(interfaceId)
+    if interfaceId == "start" then
+        if self.status <= SelfState.Closed then
+            -- 是关闭状态 触发一次
+            if self.visTriggerCount > 0 then
+                self:RawEnter()
+            else
+                self:UpdateStatusAndNotify(SelfState.WaitingForTrigger)
+            end
+        end
+    elseif self.status > SelfState.Closed then
+        self:UpdateStatusAndNotify(SelfState.Closed)
+    end
+end
+--收到GetData事件
+function FsyncElement : OnReceiveGetDataEvent(interfaceId)
+    return nil
+end
+------------------------蓝图组件相应方法End---------------------------------------------
+
+-- 脚本释放
+function FsyncElement:Exit()
+    FsyncElement.super.Exit(self)
+end
+
+return FsyncElement
+ 
+
