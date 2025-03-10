@@ -271,7 +271,7 @@ function FsyncElement:OnDialogCardBackgroundClick()
         self.btnCanvas.gameObject:SetActive(true)
     end
 
-    -- 启用摇杆控制
+    -- 启用移动控制
     self.joystickService:SetJoyStickInteractable(true)
     g_Log("@@trigger [对话触发器] 启用移动控制")
 end
@@ -287,7 +287,7 @@ function FsyncElement:OnDialogButtonClick()
         if self.btnCanvas then
             self.btnCanvas.gameObject:SetActive(false)
         end
-        -- 禁用摇杆控制
+        -- 禁用移动控制
         self.joystickService:SetJoyStickInteractable(false)
         g_Log("@@trigger [对话触发器] 显示对话卡，禁用移动控制")
         
