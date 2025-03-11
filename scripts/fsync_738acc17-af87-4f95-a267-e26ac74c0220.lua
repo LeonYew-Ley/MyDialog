@@ -32,9 +32,49 @@ function FsyncElement:initialize(worldElement)
     self.taskBubble = nil
     self.dialogCardCanvas = nil -- 对话卡的屏幕画布
     self.currentDialogIndex = 1 -- 当前显示的对话索引
+    self.audios = {}            -- 存储音频文件
+
 
     -- 订阅KEY消息
     self:SubscribeMsgKey(Fsync_Example_KEY)
+
+    -- 监听音频加载完成事件
+    self:WatchAudioLoadedEvent()
+end
+
+-- 监听音频加载完成事件
+function FsyncElement:WatchAudioLoadedEvent()
+    local audioEventKey = "DIALOG_CARD_AUDIOS_LOADED"
+
+    self.observerService:Watch(audioEventKey,
+        function(eventName, audioData)
+            if audioData and type(audioData) == "table" then
+                self.audios = audioData[0]
+                g_Log(string.format("@@trigger [对话触发器] 接收到音频数据，共 %d 个音频文件", #self.audios))
+
+                -- 音频数据接收后的处理逻辑
+                self:OnAudiosReceived()
+            else
+                g_LogError("@@trigger [对话触发器] 接收到的音频数据无效")
+            end
+        end)
+
+    g_Log("@@trigger [对话触发器] 已监听音频加载完成事件")
+end
+
+-- 音频数据接收后的处理逻辑
+function FsyncElement:OnAudiosReceived()
+    -- 这里可以添加接收到音频数据后的处理逻辑
+    -- 例如：更新UI、播放第一个音频等
+
+    if #self.audios > 0 then
+        g_Log("@@trigger [对话触发器] 音频数据接收完成，可以使用了")
+
+        -- 示例：打印所有接收到的音频信息
+        for i, audioData in ipairs(self.audios) do
+            g_Log(string.format("@@trigger [对话触发器] 音频 %d: %s", i, audioData.path or "未知路径"))
+        end
+    end
 end
 
 -- 自己avatar创建完成
@@ -397,11 +437,12 @@ function FsyncElement:UpdateDialogContent()
     end
 
     local npcData = self.npcs[self.currentNpcIndex]
-    g_Log("@@trigger [对话触发器] 当前NPCid:" .. self.currentNpcIndex)
+
     -- 查找对话卡中的相关UI元素
     local npcImage = self.dialogCardCanvas.transform:Find("dialog_avatar")
     local npcNameText = self.dialogCardCanvas.transform:Find("dialog_name")
     local dialogText = self.dialogCardCanvas.transform:Find("dialog_text")
+
     -- 更新NPC半身像
     if npcImage and npcData.avatar then
         local image = npcImage:GetComponent(typeof(CS.UnityEngine.UI.Image))
@@ -410,7 +451,7 @@ function FsyncElement:UpdateDialogContent()
         end
     end
 
-    -- 更新NPC名称和对话内容
+    -- 更新NPC名称
     if npcNameText then
         local nameText = npcNameText:GetComponent(typeof(CS.UnityEngine.UI.Text))
         if nameText then
@@ -435,6 +476,9 @@ function FsyncElement:UpdateDialogContent()
 
             g_Log(string.format("@@trigger [对话触发器] 设置对话内容(%d/%d): %s",
                 self.currentDialogIndex, #npcData.dialogJson.dialogs, contentText.text))
+
+            -- 播放对应的音频
+            self:PlayAudio(self.currentDialogIndex)
         else
             contentText.text = "..."
             g_LogError("@@trigger [对话触发器] 未找到有效的对话内容")
@@ -442,6 +486,30 @@ function FsyncElement:UpdateDialogContent()
     end
 
     g_Log(string.format("@@trigger [对话触发器] 已更新NPC%d的对话内容", self.currentNpcIndex))
+end
+
+-- 播放指定索引的音频
+function FsyncElement:PlayAudio(index)
+    if not self.audios or #self.audios == 0 then
+        g_LogError("@@trigger [对话触发器] 没有可播放的音频")
+        return
+    end
+
+    if index < 1 or index > #self.audios then
+        g_LogError(string.format("@@trigger [对话触发器] 音频索引 %d 超出范围 (1-%d)",
+            index, #self.audios))
+        return
+    end
+
+    local audioData = self.audios[index]
+    g_Log("@@trigger [对话触发器] type(audioData): " .. type(audioData))
+    if audioData then
+        self.audioService:PlayClipOneShot(audioData, function()
+            g_Log(string.format("@@trigger [对话触发器] 音频 %d 播放完成", index))
+        end)
+    else
+        g_LogError(string.format("@@trigger [对话触发器] 音频 %d 无效", index))
+    end
 end
 
 return FsyncElement
