@@ -1,0 +1,173 @@
+---
+---  Author: 【王德】
+---  AuthorID: 【102030】
+---  CreateTime: 【2024-2-21 10:36:31】
+--- 【FSync】
+--- 【业务冲突配置管理】
+---
+
+local class = require("middleclass")
+local WBElement = require("mworld/worldBaseElement")
+
+---@class fsync_33bc07ac_93e7_4947_b9bb_bfefe949b7ce : WorldBaseElement
+local FsyncElement = class("fsync_33bc07ac-93e7-4947-b9bb-bfefe949b7ce", WBElement)
+
+local TAG = "BusinessConflictService"
+---@param worldElement CS.Tal.framesync.WorldElement
+function FsyncElement:initialize(worldElement)
+    FsyncElement.super.initialize(self, worldElement)
+    self:InitService()
+    self.configFile = self.configService:GetAssetByConfigKey(self.VisElement, "configFile")
+    -- self.configFile = self.assetService:GetConfigGameObjectWithName(self.VisElement, "configFile")
+    if self.configFile then
+        self.configFileJson = self.jsonService:decode(self.configFile)
+        if self.businessConflictService and self.configFileJson then
+            g_Log(TAG, "设置冲突配置")
+            self.businessConflictService:SetConflictConfig(self.configFileJson)
+        end
+    else
+        g_LogError(TAG, "配置文件不存在")
+    end
+
+    -- self.businessConflictService:Register("PET_PK", function(status, block, extract, from)
+    --     if status == 1 then
+    --         g_Log(TAG, "PET_PK业务开启"..table.dump(block))
+    --     else
+    --         g_Log(TAG, "PET_PK业务关闭"..table.dump(block))
+    --     end
+    -- end)
+
+    -- self.businessConflictService:Register("SWIM_UI", function(status, block, extract, from)
+    --     if status == 1 then
+    --         g_Log(TAG, "SWIM_UI业务开启"..table.dump(block))
+    --     else
+    --         g_Log(TAG, "SWIM_UI业务关闭"..table.dump(block))
+    --     end
+    -- end)
+
+    -- self.businessConflictService:Register("LIFT_AVATAR", function(status, block, extract, from)
+    --     if status == 1 then
+    --         g_Log(TAG, "LIFT_AVATAR业务开启"..table.dump(block))
+    --     else
+    --         g_Log(TAG, "LIFT_AVATAR业务关闭"..table.dump(block))
+    --     end
+    -- end)
+
+    -- self.businessConflictService:Register("PET_PVE_BATANO", function(status, block, extract, from)
+    --     if status == 1 then
+    --         g_Log(TAG, "PET_PVE_BATANO业务开启"..table.dump(block))
+    --     else
+    --         g_Log(TAG, "PET_PVE_BATANO业务关闭"..table.dump(block))
+    --     end
+    -- end)
+    -- self.commonService:DispatchAfter(10,function ()
+    --     self.businessConflictService:DidOpenBusiness("PROP")
+    
+    -- end)
+    -- self.commonService:DispatchAfter(15,function ()
+    --     self.businessConflictService:DidCloseBusiness("PROP")
+    
+    -- end)
+
+end
+
+function FsyncElement:InitService()
+    ---@type CommonService
+    self.commonService = App:GetService("CommonService")
+
+    ---@type JsonService
+    self.jsonService = CourseEnv.ServicesManager:GetJsonService()
+    ---@type HttpService
+    self.httpService = CourseEnv.ServicesManager:GetHttpService()
+    ---@type ObserverService
+    self.observerService = CourseEnv.ServicesManager:GetObserverService()
+    ---@type ConfigService
+    self.configService = CourseEnv.ServicesManager:GetConfigService()
+    ---@type AudioService
+    self.audioService = CourseEnv.ServicesManager:GetAudioService()
+    ---@type UIService
+    self.uiService = CourseEnv.ServicesManager:GetUIService()
+    ---@type AvatarService
+    self.avatarService = CourseEnv.ServicesManager:GetAvatarService()
+    ---@type AssetService
+    self.assetService = CourseEnv.ServicesManager:GetAssetService()
+    if CourseEnv.ServicesManager.GetBusinessConflictService then
+        self.businessConflictService = CourseEnv.ServicesManager:GetBusinessConflictService()
+    end
+    
+
+    self.debugService = App:GetService("DebugService")
+end
+
+-- 收到/恢复IRC消息
+-- @param key  订阅的消息key
+-- @param value  消息集合体
+-- @param isResume  是否为恢复消息
+function FsyncElement:ReceiveMessage(key, value, isResume)
+    -- TODO:
+end
+
+-- 发送KEY-VALUE 消息
+-- @param key 自定义/协议key
+-- @param body  table 消息体
+function FsyncElement:SendCustomMessage(key, body)
+    self:SendMessage(key, body)
+end
+
+-- 自己avatar对象创建完成
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:SelfAvatarCreated(avatar)
+
+end
+
+-- 自己avatar对象人物模型加载完成ba
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:SelfAvatarPrefabLoaded(avatar)
+
+end
+
+-- avatar对象创建完成，包含他人和自己
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:AvatarCreated(avatar)
+
+end
+
+------------------------蓝图组件相应方法---------------------------------------------
+--是否是异步恢复如果是需要改成true
+function FsyncElement:LogicMapIsAsyncRecorver()
+    return false
+end
+
+--开始恢复方法（断线重连的时候用）
+function FsyncElement:LogicMapStartRecover()
+    FsyncElement.super:LogicMapStartRecover()
+    --TODO
+end
+
+--结束恢复方法 (断线重连的时候用)
+function FsyncElement:LogicMapEndRecover()
+    FsyncElement.super:LogicMapEndRecover(self)
+    --TODO
+end
+
+--所有的组件恢复完成
+function FsyncElement:LogicMapAllComponentRecoverComplete()
+end
+
+--收到Trigger事件
+function FsyncElement:OnReceiveTriggerEvent(interfaceId)
+end
+
+--收到GetData事件
+function FsyncElement:OnReceiveGetDataEvent(interfaceId)
+    return nil
+end
+
+------------------------蓝图组件相应方法End---------------------------------------------
+
+-- 脚本释放
+function FsyncElement:Exit()
+    FsyncElement.super.Exit(self)
+end
+
+return FsyncElement

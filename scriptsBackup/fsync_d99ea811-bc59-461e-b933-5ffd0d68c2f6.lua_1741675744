@@ -1,0 +1,619 @@
+---
+---  Author: 【王德】
+---  AuthorID: 【102030】
+---  CreateTime: 【2024-8-22 14:58:48】
+--- 【FSync】
+--- 【靠近触发】
+---
+
+local class = require("middleclass")
+local WBElement = require("mworld/worldBaseElement")
+
+---@class fsync_d99ea811_bc59_461e_b933_5ffd0d68c2f6 : WorldBaseElement
+local FsyncElement = class("fsync_d99ea811-bc59-461e-b933-5ffd0d68c2f6", WBElement)
+local TAG = "靠近触发"
+local NEAR_BUSINESS_AVATAR_AREA_CHANGE = "NEAR_BUSINESS_AVATAR_AREA_CHANGE"
+---@param worldElement CS.Tal.framesync.WorldElement
+function FsyncElement:initialize(worldElement)
+    FsyncElement.super.initialize(self, worldElement)
+    self.curNpcIndex = -1
+    self.triggerList = {}
+    self.npcConfig = {}
+    -- 活动的npc列表
+    self.activeNpcList = {}
+    self.avatarList = {}
+    self.avatarAreai = -1
+    self.avatarAreaj = -1
+    self.avatarNearBusiness = {}
+    self:InitConfig()
+    self:RegisterEvent()
+    self:SubscribeMsgKey(NEAR_BUSINESS_AVATAR_AREA_CHANGE)
+    self:RegisterAvatarStatus()
+end
+
+function FsyncElement:buildArea()
+    -- 区域大小为5米
+    local AREA_SIZE = self.areaRange
+
+    -- 获取场景范围
+    local minX = self.minAreaX
+    local maxX = self.maxAreaX
+    local minZ = self.minAreaZ
+    local maxZ = self.maxAreaZ
+
+    -- 计算区域数量
+    local numAreasX = math.ceil((maxX - minX) / AREA_SIZE)
+    local numAreasZ = math.ceil((maxZ - minZ) / AREA_SIZE)
+
+    -- 创建区域表
+    self.areas = {}
+    self.minXIndex = 1
+    self.maxXIndex = numAreasX
+    self.minZIndex = 1
+    self.maxZIndex = numAreasZ
+    -- 划分区域
+    for i = 1, numAreasX do
+        self.areas[i] = {}
+        for j = 1, numAreasZ do
+            -- 计算区域边界
+            local areaMinX = minX + (i - 1) * AREA_SIZE
+            local areaMaxX = areaMinX + AREA_SIZE
+            local areaMinZ = minZ + (j - 1) * AREA_SIZE
+            local areaMaxZ = areaMinZ + AREA_SIZE
+
+            -- 存储区域信息
+            self.areas[i][j] = {
+                minX = areaMinX,
+                maxX = areaMaxX,
+                minZ = areaMinZ,
+                maxZ = areaMaxZ,
+                npc = {},
+                avatar = {}
+            }
+        end
+    end
+end
+
+function FsyncElement:RegisterEvent()
+    -- {
+    --     status = 1, --
+    --     npc = npc,
+    --     distance = distance, 可选
+    --     static = static, --是否静态npc，true为静态，false为可移动npc 可移动npc不会走划分区块检测
+    --     callBack = callBack
+    -- }
+    -- 需要先取消再进行销毁或隐藏 禁止同名多次注册
+    self.observerService:Watch("ABCZONE_REGISTER_NEAR_AVATAR", function(key, value)
+        local data = value[0]
+        local status = data.status -- 1 register 2 unregister
+        local npc = data.npc
+        local distance = data.distance
+        local static = data.static --是否是可动npc
+        if not distance then
+            distance = self.distanceNum
+        else
+            distance = distance * distance
+        end
+        local callBack = data.callBack
+        local pos = { x = npc.transform.position.x, y = npc.transform.position.y, z = npc.transform.position.z }
+        local i, j = self:getAreaIndex(pos)
+        if static then
+            if status == 1 then
+                if i ~= 0 and j ~= 0 then
+                    self.areas[i][j].npc[npc.name] = {
+                        npc = npc,
+                        pos = pos,
+                        distance = distance,
+                        static = static,
+                        callBack = callBack,
+                        isOpen = true,
+                        hasTrigger = false,
+                    }
+                end
+            else
+                if i ~= 0 and j ~= 0 then
+                    self.areas[i][j].npc[npc.name] = nil
+                end
+            end
+        else
+            if status == 1 then
+                self.activeNpcList[npc.name] = { npc = npc.transform, distance = distance, callBack = callBack, static = false, hasTrigger = false }
+            else
+                self.activeNpcList[npc.name] = nil
+            end
+        end
+    end)
+
+    self.observerService:Watch("ABCZONE_REGISTER_AVATAR_NEAR_AVATAR", function(key, value)
+        local data = value[0]
+        local distance = data.distance
+        if not distance then
+            distance = self.distanceNum
+        else
+            distance = distance * distance
+        end
+        local callBack = data.callBack
+        if not self.avatarNearBusiness[tostring(distance)] then
+            self.avatarNearBusiness[tostring(distance)] = {}
+            self.avatarNearBusiness[tostring(distance)] = {
+                distance = distance,
+                nearAvatar = {},
+                awayAvatar = {},
+                callBacks = {}
+            }
+        end
+        table.insert(self.avatarNearBusiness[tostring(distance)].callBacks, callBack)
+        self.startAvatarCheck = true
+    end)
+end
+
+function FsyncElement:RegisterAvatarStatus()
+    ---@type Gate
+    self.gate = CourseEnv.ServicesManager.Gate
+    --- 用户离开
+    self.gate.OnUserLeaveRoom:connect(function(uuid)
+        if App.Uuid == uuid then
+            return
+        end
+        if self.avatarList[uuid] then
+            local i, j = self.avatarList[uuid].avatarAreai, self.avatarList[uuid].avatarAreaj
+            if self.startAvatarCheck and i ~= 0 and j ~= 0 and self.areas[i] and self.areas[i][j] and self.areas[i][j].avatar[uuid] and #self.areas[i][j].avatar[uuid].hasTriggerList > 0 then
+                for _, triggerDis in ipairs(self.areas[i][j].avatar[uuid].hasTriggerList) do
+                    local callBacks = self.avatarNearBusiness[tostring(triggerDis)].callBacks
+                    for _, callBack in ipairs(callBacks) do
+                        callBack({}, { {
+                            avatar = self.areas[i][j].avatar[uuid].avatar,
+                            uuid = uuid,
+                            distance = 100
+                        } })
+                    end
+                end
+            end
+            if i and j and i ~= 0 and j ~= 0 then
+                if self.areas[i] and self.areas[i][j] then
+                    if self.areas[i][j].avatar then
+                        self.areas[i][j].avatar[uuid] = nil
+                    else
+                        self.areas[i][j].avatar = {}
+                    end
+                end
+            end
+        end
+        self.avatarList[uuid] = nil
+    end)
+
+    self.gate.OnUserJoinRoom:connect(function(uuid)
+        if App.Uuid == uuid then
+            return
+        end
+        self.avatarList[uuid] = { uuid = uuid }
+        self.commonService:DispatchNextFrame(function()
+            local avatar = self.avatarService:GetAvatarByUUID(uuid)
+            if avatar and self.avatarList[uuid] then
+                self.avatarList[uuid].avatar = avatar
+                self.avatarList[uuid].avatarTransform = avatar.Body.transform
+                local i, j = self:getAreaIndex(avatar.Body.transform.position)
+                self.avatarList[uuid].avatarAreai = i
+                self.avatarList[uuid].avatarAreaj = j
+                self.avatarList[uuid].static = false
+                self.avatarList[uuid].isOpen = true
+                self.avatarList[uuid].hasTriggerList = {}
+                self.areas[i][j].avatar[uuid] = self.avatarList[uuid]
+            end
+        end)
+    end)
+end
+
+function FsyncElement:InitConfig()
+    ---触发距离 配置的是米，但计算直接用了平方
+    self.distanceNum = tonumber(self.configService:GetConfigValueByConfigKey(self.VisElement, "distanceNum"))
+    self.distanceNum = self.distanceNum * self.distanceNum
+    local isOpenConfig = self.configService:GetConfigValueByConfigKey(self.VisElement, "isOpen")
+    if isOpenConfig == "False" then
+        self.isOpen = false
+    else
+        self.isOpen = true
+    end
+    self.areaRange = tonumber(self.configService:GetConfigValueByConfigKey(self.VisElement, "areaRange"))
+    local areaX = self.jsonService:decode(self.configService:GetConfigValueByConfigKey(self.VisElement, "area_x"))
+
+    self.minAreaX = tonumber(areaX.x)
+    self.maxAreaX = tonumber(areaX.y)
+    local areaZ = self.jsonService:decode(self.configService:GetConfigValueByConfigKey(self.VisElement, "area_z"))
+    self.minAreaZ = tonumber(areaZ.x)
+    self.maxAreaZ = tonumber(areaZ.y)
+    self:buildArea()
+
+    local npcConfig = self.configService:GetConfigValueByConfigKey(self.VisElement, "CustomConfigListEditor")
+    if npcConfig and npcConfig ~= "" then
+        local npcConfigJson = self.jsonService:decode(npcConfig)
+        for i, v in ipairs(npcConfigJson) do
+            local npc = nil
+            local name = v.name
+            if name then
+                npc = self.assetService:FindAllInWorkSpaceWithName(name)
+            end
+            if not npc then
+                npc = self.assetService:GetPickedSpaceGoByCustomConfigKey(self.VisElement, i, "model")
+            end
+            if npc then
+                local distanceNum = tonumber(v.distanceNum)
+                if distanceNum <= 0 then --如果下边不配置距离按照默认距离
+                    distanceNum = self.distanceNum
+                else
+                    distanceNum = distanceNum * distanceNum
+                end
+                local pos = { x = npc.transform.position.x, y = npc.transform.position.y, z = npc.transform.position.z }
+                local indexI, indexJ = self:getAreaIndex(pos)
+                if indexI ~= 0 and indexJ ~= 0 then
+                    self.areas[indexI][indexJ].npc[npc.name] = {
+                        npc = npc,
+                        pos = pos,
+                        distance = distanceNum,
+                        static = true,
+                        callBack = nil,
+                        isOpen = true,
+                        hasTrigger = false,
+                        triggerStart = "startTrigger" .. tostring(i - 1),
+                        triggerStop = "stopTrigger" .. tostring(i - 1),
+                        triggerNear = "nearNpc" .. tostring(i - 1),
+                        triggerAway = "awayNpc" .. tostring(i - 1),
+                    }
+                end
+
+                table.insert(self.npcConfig, {
+                    npc = npc,
+                    pos = pos,
+                    static = true,
+                    distanceNum = distanceNum,
+                    isOpen = true,
+                    triggerStart = "startTrigger" .. tostring(i - 1),
+                    triggerStop = "stopTrigger" .. tostring(i - 1),
+                    triggerNear = "nearNpc" .. tostring(i - 1),
+                    triggerAway = "awayNpc" .. tostring(i - 1),
+                })
+            end
+        end
+    end
+end
+
+---判断并返回物体所在区域的i,j
+---@param position CS.UnityEngine.Vector3 物体位置
+---@return number,number
+function FsyncElement:getAreaIndex(position)
+    if not position then
+        return 0, 0
+    end
+    local x = position.x
+    local z = position.z
+
+    -- 超出范围返回0,0
+    if x < self.minAreaX or x > self.maxAreaX or z < self.minAreaZ or z > self.maxAreaZ then
+        return 0, 0
+    end
+    -- 计算i,j坐标
+    local i = math.floor((x - self.minAreaX) / self.areaRange) + 1
+    local j = math.floor((z - self.minAreaZ) / self.areaRange) + 1
+
+    return i, j
+end
+
+---开始判断距离
+function FsyncElement:startDistanceTrigger()
+    if self.timer then
+        self.commonService:UnregisterGlobalTimer(self.timer)
+        self.timer = nil
+    end
+    g_Log(TAG, "startDistanceTrigger")
+    local selfAvatarAreai = 0
+    local selfAvatarAreaj = 0
+    local areaIndexList = {}
+    local distanceToAvatar = 0
+    local avatarPos = { x = 0, y = 0, z = 0 }
+    self.timer = self.commonService:RegisterGlobalTimer(0.5, function()
+        if self.avatarTransform then
+            avatarPos = {
+                x = self.avatarTransform.position.x,
+                y = self.avatarTransform.position.y,
+                z = self
+                    .avatarTransform.position.z
+            }
+            selfAvatarAreai, selfAvatarAreaj = self:getAreaIndex(avatarPos)
+            if (self.avatarAreai ~= selfAvatarAreai or self.avatarAreaj ~= selfAvatarAreaj) and selfAvatarAreai ~= 0 and selfAvatarAreaj ~= 0 then
+                self.avatarAreai = selfAvatarAreai
+                self.avatarAreaj = selfAvatarAreaj
+                self:SendCustomMessage(NEAR_BUSINESS_AVATAR_AREA_CHANGE,
+                    { uuid = App.Uuid, areai = selfAvatarAreai, areaj = selfAvatarAreaj })
+            end
+            -- 获取avatar所在区域的九宫格index
+            areaIndexList = {
+                { selfAvatarAreai,     selfAvatarAreaj },
+                { selfAvatarAreai,     selfAvatarAreaj - 1 },
+                { selfAvatarAreai,     selfAvatarAreaj + 1 },
+                { selfAvatarAreai - 1, selfAvatarAreaj },
+                { selfAvatarAreai + 1, selfAvatarAreaj },
+                { selfAvatarAreai - 1, selfAvatarAreaj - 1 },
+                { selfAvatarAreai - 1, selfAvatarAreaj + 1 },
+                { selfAvatarAreai + 1, selfAvatarAreaj - 1 },
+                { selfAvatarAreai + 1, selfAvatarAreaj + 1 }
+            }
+            self:CompareAreaList(areaIndexList)
+            self.lastAreaIndexList = areaIndexList
+            -- 遍历九宫格区域内的所有npc
+            local count = 0
+            for _, areaValue in ipairs(areaIndexList) do
+                if areaValue[1] >= self.minXIndex and areaValue[1] <= self.maxXIndex and areaValue[2] >= self.minZIndex and areaValue[2] <= self.maxZIndex then
+                    -- 获取该区域内的所有npc
+                    local npcsInArea = self.areas[areaValue[1]][areaValue[2]].npc
+                    if npcsInArea then
+                        for _, npcInfo in pairs(npcsInArea) do
+                            if npcInfo.isOpen then
+                                count = count + 1
+                                distanceToAvatar = NextMath.DistanceSqrt(avatarPos, npcInfo.pos)
+                                -- 这里可以添加与npc的距离判断逻辑
+                                if distanceToAvatar < npcInfo.distance then
+                                    self:TriggerToBusiness(npcInfo, true)
+                                else
+                                    self:TriggerToBusiness(npcInfo, false)
+                                end
+                            end
+                        end
+                    end
+                    --如果有注册人和人的距离判断
+                    if self.startAvatarCheck then
+                        local avatarsInArea = self.areas[areaValue[1]][areaValue[2]].avatar
+                        if avatarsInArea then
+                            for _, avatarInfo in pairs(avatarsInArea) do
+                                if avatarInfo.avatar and avatarInfo.avatar.characterCtrl and not avatarInfo.avatar.characterCtrl.zombiePlayer then
+                                    distanceToAvatar = NextMath.DistanceSqrt(avatarPos,
+                                        avatarInfo.avatarTransform.position)
+                                    self:AddTriggerInfo(avatarInfo, distanceToAvatar)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+            if self.startAvatarCheck then
+                for _, nearAvatar in pairs(self.avatarNearBusiness) do
+                    if #nearAvatar.nearAvatar > 0 or #nearAvatar.awayAvatar > 0 then
+                        if #nearAvatar.nearAvatar > 1 then
+                            table.sort(nearAvatar.nearAvatar, function(a, b)
+                                return a.distanceSqrt < b.distanceSqrt
+                            end)
+                        end
+                        for _, callBack in pairs(nearAvatar.callBacks) do
+                            callBack(nearAvatar.nearAvatar, nearAvatar.awayAvatar)
+                        end
+                    end
+                    ---清空
+                    nearAvatar.nearAvatar = {}
+                    nearAvatar.awayAvatar = {}
+                end
+            end
+            -- g_Log(TAG, "检测的道具数量count:" .. count)
+            for _, npcInfo in pairs(self.activeNpcList) do
+                distanceToAvatar = NextMath.DistanceSqrt(avatarPos, npcInfo.npc.position)
+                if distanceToAvatar < npcInfo.distance then
+                    self:TriggerToBusiness(npcInfo, true)
+                else
+                    self:TriggerToBusiness(npcInfo, false)
+                end
+            end
+        end
+    end)
+end
+
+function FsyncElement:TriggerToBusiness(npcInfo, isTrigger)
+    if isTrigger then
+        if not npcInfo.hasTrigger then
+            npcInfo.hasTrigger = true
+            if npcInfo.callBack then
+                npcInfo.callBack(true)
+            elseif npcInfo.triggerNear then
+                self:Trigger(npcInfo.triggerNear)
+            end
+        end
+    else
+        if npcInfo.hasTrigger then
+            npcInfo.hasTrigger = false
+            if npcInfo.callBack then
+                npcInfo.callBack(false)
+            elseif npcInfo.triggerAway then
+                self:Trigger(npcInfo.triggerAway)
+            end
+        end
+    end
+end
+
+---存储本帧 靠近和远离的avatar
+function FsyncElement:AddTriggerInfo(avatarInfo, distanceToAvatar)
+    if not avatarInfo.hasTriggerList then
+        avatarInfo.hasTriggerList = {}
+    end
+    for i, nearAvatar in pairs(self.avatarNearBusiness) do
+        if distanceToAvatar < nearAvatar.distance then
+            local hasTrigger = false
+            for j, triggerDis in ipairs(avatarInfo.hasTriggerList) do
+                if i == triggerDis then
+                    hasTrigger = true
+                    break
+                end
+            end
+            if not hasTrigger then
+                table.insert(avatarInfo.hasTriggerList, i)
+            end
+            table.insert(nearAvatar.nearAvatar,
+                {
+                    avatar = avatarInfo.avatar,
+                    uuid = avatarInfo.uuid,
+                    distanceSqrt =
+                        distanceToAvatar
+                })
+            -- end
+        elseif distanceToAvatar > nearAvatar.distance then
+            local hasTrigger = false
+            for j, triggerDis in ipairs(avatarInfo.hasTriggerList) do
+                if i == triggerDis then
+                    hasTrigger = true
+                    table.remove(avatarInfo.hasTriggerList, j)
+                    break
+                end
+            end
+            if hasTrigger then
+                table.insert(nearAvatar.awayAvatar,
+                    {
+                        avatar = avatarInfo.avatar,
+                        uuid = avatarInfo.uuid,
+                        distanceSqrt =
+                            distanceToAvatar
+                    })
+            end
+        end
+    end
+end
+
+function FsyncElement:CompareAreaList(areaIndexList)
+    if self.lastAreaIndexList then
+        -- 对比上一个list和这一个list缺少的区域
+        for _, lastArea in ipairs(self.lastAreaIndexList) do
+            local found = false
+            for _, currentArea in ipairs(areaIndexList) do
+                if lastArea[1] == currentArea[1] and lastArea[2] == currentArea[2] then
+                    found = true
+                    break
+                end
+            end
+            -- 如果在新的区域列表中找不到旧区域,说明离开了该区域
+            if not found then
+                local areai = lastArea[1]
+                local areaj = lastArea[2]
+                if areai >= self.minXIndex and areai <= self.maxXIndex and areaj >= self.minZIndex and areaj <= self.maxZIndex then
+                    local npcsInArea = self.areas[areai][areaj].npc
+                    if npcsInArea then
+                        for _, npcInfo in pairs(npcsInArea) do
+                            self:TriggerToBusiness(npcInfo, false)
+                        end
+                    end
+                    if self.startAvatarCheck then
+                        local avatarsInArea = self.areas[areai][areaj].avatar
+                        if avatarsInArea then
+                            for _, avatarInfo in pairs(avatarsInArea) do
+                                self:AddTriggerInfo(avatarInfo, 100)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- 收到/恢复IRC消息
+-- @param key  订阅的消息key
+-- @param value  消息集合体
+-- @param isResume  是否为恢复消息
+function FsyncElement:ReceiveMessage(key, value, isResume)
+    -- TODO:
+    if key == NEAR_BUSINESS_AVATAR_AREA_CHANGE then
+        if not isResume then
+            for i, v in ipairs(value) do
+                local msg = self.jsonService:decode(v)
+                local uuid = msg.uuid
+                local areai = msg.areai
+                local areaj = msg.areaj
+                if self.avatarList[uuid] and App.Uuid ~= uuid and areai ~= 0 and areaj ~= 0 then
+                    --原来的要删除
+                    local oldAreai = self.avatarList[uuid].avatarAreai
+                    local oldAreaj = self.avatarList[uuid].avatarAreaj
+                    if oldAreai and oldAreaj and self.areas[oldAreai] and self.areas[oldAreai][oldAreaj] and self.areas[oldAreai][oldAreaj].avatar[uuid] then
+                        self.areas[oldAreai][oldAreaj].avatar[uuid] = nil
+                    end
+                    self.avatarList[uuid].avatarAreai = areai
+                    self.avatarList[uuid].avatarAreaj = areaj
+                    if self.areas[areai] and self.areas[areai][areaj] then
+                        self.areas[areai][areaj].avatar[uuid] = self.avatarList[uuid]
+                    end
+                end
+            end
+        end
+    end
+end
+
+-- 发送KEY-VALUE 消息
+-- @param key 自定义/协议key
+-- @param body  table 消息体
+function FsyncElement:SendCustomMessage(key, body)
+    self:SendMessage(key, body)
+end
+
+-- 自己avatar对象创建完成
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:SelfAvatarCreated(avatar)
+    self.avatarGameObject = avatar.Body
+    self.avatarTransform = avatar.Body.transform
+    self.avatarAreai, self.avatarAreaj = self:getAreaIndex(self.avatarTransform.position)
+    self:SendCustomMessage(NEAR_BUSINESS_AVATAR_AREA_CHANGE,
+        { uuid = App.Uuid, areai = self.avatarAreai, areaj = self.avatarAreaj })
+
+    self:startDistanceTrigger()
+end
+
+-- 自己avatar对象人物模型加载完成ba
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:SelfAvatarPrefabLoaded(avatar)
+
+end
+
+-- avatar对象创建完成，包含他人和自己
+-- @param avatar 对应自己的Fsync_avatar对象
+function FsyncElement:AvatarCreated(avatar)
+
+end
+
+------------------------蓝图组件相应方法---------------------------------------------
+--是否是异步恢复如果是需要改成true
+function FsyncElement:LogicMapIsAsyncRecorver()
+    return false
+end
+
+--开始恢复方法（断线重连的时候用）
+function FsyncElement:LogicMapStartRecover()
+    FsyncElement.super:LogicMapStartRecover()
+    --TODO
+end
+
+--结束恢复方法 (断线重连的时候用)
+function FsyncElement:LogicMapEndRecover()
+    FsyncElement.super:LogicMapEndRecover(self)
+    --TODO
+end
+
+--所有的组件恢复完成
+function FsyncElement:LogicMapAllComponentRecoverComplete()
+end
+
+--收到Trigger事件
+function FsyncElement:OnReceiveTriggerEvent(interfaceId)
+    for i, v in ipairs(self.npcConfig) do
+        if interfaceId == v.triggerStart then
+            self.npcConfig[i].isOpen = true
+        elseif interfaceId == v.triggerStop then
+            self.npcConfig[i].isOpen = false
+        end
+    end
+end
+
+--收到GetData事件
+function FsyncElement:OnReceiveGetDataEvent(interfaceId)
+    return nil
+end
+
+------------------------蓝图组件相应方法End---------------------------------------------
+
+-- 脚本释放
+function FsyncElement:Exit()
+    FsyncElement.super.Exit(self)
+end
+
+return FsyncElement

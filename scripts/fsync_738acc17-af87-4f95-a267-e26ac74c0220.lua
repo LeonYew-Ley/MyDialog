@@ -15,28 +15,26 @@ local WBElement = require("mworld/worldBaseElement")
 
 ---@class fsync_738acc17_af87_4f95_a267_e26ac74c0220 : WorldBaseElement
 local FsyncElement = class("fsync_738acc17-af87-4f95-a267-e26ac74c0220", WBElement)
-
+local GameObject = CS.UnityEngine.GameObject
 local Fsync_Example_KEY = "_Example__Key_"
-local Vector3 = CS.UnityEngine.Vector3
 
 ---@param worldElement CS.Tal.framesync.WorldElement
 function FsyncElement:initialize(worldElement)
     FsyncElement.super.initialize(self, worldElement)
-    
+
     -- 初始化基础变量
     self.npcRoot = nil
-    self.btnCanvas = nil        -- 对话按钮画布的屏幕画布
-    self.npcs = {}
-    self.dialogDistance = 2.0
+    self.btnCanvas = nil -- 对话按钮画布的屏幕画布
+    self.npcs = {}       -- 存储所有NPC数据
+    self.dialogDistance = tonumber(self.configHandler:GetStringByConfigKey("dialogDistance")) or 2
     self.isInRange = false
     self.distance = math.huge
     self.taskBubble = nil
-    self.dialogCardCanvas = nil  -- 对话卡的屏幕画布
-    
+    self.dialogCardCanvas = nil -- 对话卡的屏幕画布
+    self.currentDialogIndex = 1 -- 当前显示的对话索引
+
     -- 订阅KEY消息
     self:SubscribeMsgKey(Fsync_Example_KEY)
-    
-    g_Log("@@trigger [对话触发器] 初始化完成，对话触发距离: " .. tostring(self.dialogDistance))
 end
 
 -- 自己avatar创建完成
@@ -65,36 +63,63 @@ function FsyncElement:InitSceneObjects()
         g_LogError("@@trigger [对话触发器] 未找到NPC根节点")
         return
     end
-    
+
     -- 从配置中获取NPC列表
-    local npc1 = self.configHandler:GetGameObjectByConfigKey("npc1")
-    local npc2 = self.configHandler:GetGameObjectByConfigKey("npc2")
-    
-    -- 检查并添加NPC
-    if npc1 then 
-        table.insert(self.npcs, npc1)
-        g_Log("@@trigger [对话触发器] 成功添加NPC1")
-    else
-        g_LogError("@@trigger [对话触发器] 未配置NPC1或NPC1不存在")
-    end
-    
-    if npc2 then 
-        table.insert(self.npcs, npc2)
-        g_Log("@@trigger [对话触发器] 成功添加NPC2")
-    else
-        g_LogError("@@trigger [对话触发器] 未配置NPC2或NPC2不存在")
-    end
-    
-    -- 获取NPC1的任务气泡
-    if npc1 then
-        self.taskBubble = npc1.transform:Find("场景画布/任务气泡")
-        if self.taskBubble then
-            g_Log("@@trigger [对话触发器] 成功找到任务气泡")
+    local listConfigHandler = self.configHandler:GetListSubConfigHandler("NPCList")
+    for i, configHandler in ipairs(listConfigHandler) do
+        -- 创建NPC数据表
+        local npcGameObject = configHandler:GetGameObjectByConfigKey("npc")
+
+        if npcGameObject then
+            -- 创建NPC数据结构
+            local npcData = {
+                gameObject = npcGameObject,
+                avatar = configHandler:GetSpriteByConfigKey("npcAvatar"),
+                dialogJson = nil,
+                taskBubble = nil,
+                name = configHandler:GetStringByConfigKey("npcName") or "unknown",
+                dialogs = {} -- 新增dialogs变量，存储对话内容
+            }
+
+            -- 查找任务气泡
+            local taskBubble = npcGameObject.transform:Find("场景画布/任务气泡")
+            if taskBubble then
+                npcData.taskBubble = taskBubble
+                g_Log(string.format("@@trigger [对话触发器] NPC%d找到任务气泡", i))
+            else
+                g_Log(string.format("@@trigger [对话触发器] NPC%d未找到任务气泡", i))
+            end
+
+            -- 获取对话文件内容
+            local dialogFile = configHandler:GetStringByConfigKey("dialogFile")
+            if dialogFile then
+                -- 直接解析JSON字符串
+                local dialogJson = self.jsonService:decode(dialogFile)
+                if dialogJson then
+                    -- 保存解析后的JSON对象
+                    npcData.dialogJson = dialogJson
+
+                    -- 解析对话内容到dialogs数组
+                    if dialogJson.dialogs and type(dialogJson.dialogs) == "table" then
+                        npcData.dialogs = dialogJson.dialogs
+                        g_Log(string.format("@@trigger [对话触发器] NPC%d成功加载%d条对话", i, #dialogJson.dialogs))
+                    else
+                        g_LogError(string.format("@@trigger [对话触发器] NPC%d的对话文件格式不正确", i))
+                    end
+                else
+                    g_LogError(string.format("@@trigger [对话触发器] NPC%d的对话文件解析失败", i))
+                end
+            else
+                g_Log(string.format("@@trigger [对话触发器] NPC%d未配置对话文件", i))
+            end
+
+            -- 添加到NPC列表
+            table.insert(self.npcs, npcData)
+            g_Log(string.format("@@trigger [对话触发器] 成功添加NPC%d及其相关数据", i))
         else
-            g_LogError("@@trigger [对话触发器] 未找到任务气泡")
+            g_LogError(string.format("@@trigger [对话触发器] 未配置NPC%d或NPC%d不存在", i, i))
         end
     end
-    
     -- 查找对话按钮画布
     local dialogBtnCanvas = GameObject.Find("对话按钮画布")
     if dialogBtnCanvas then
@@ -102,7 +127,7 @@ function FsyncElement:InitSceneObjects()
         if self.btnCanvas then
             -- 初始时隐藏按钮画布
             self.btnCanvas.gameObject:SetActive(false)
-            
+
             -- 查找对话按钮并添加点击事件
             local dialogBtn = self.btnCanvas.transform:Find("对话按钮")
             if dialogBtn then
@@ -113,7 +138,7 @@ function FsyncElement:InitSceneObjects()
             else
                 g_LogError("@@trigger [对话触发器] 未找到对话按钮")
             end
-            
+
             g_Log("@@trigger [对话触发器] 成功初始化按钮画布")
         else
             g_LogError("@@trigger [对话触发器] 未找到屏幕画布")
@@ -129,7 +154,7 @@ function FsyncElement:InitSceneObjects()
         if self.dialogCardCanvas then
             -- 初始时隐藏对话卡
             self.dialogCardCanvas.gameObject:SetActive(false)
-            
+
             -- 查找并添加黑色背景按钮的点击事件
             local blackBgBtn = self.dialogCardCanvas.transform:Find("黑色背景按钮")
             if blackBgBtn then
@@ -140,7 +165,18 @@ function FsyncElement:InitSceneObjects()
             else
                 g_LogError("@@trigger [对话触发器] 未找到对话卡黑色背景按钮")
             end
-            
+
+            -- 查找并添加翻页按钮的点击事件
+            local nextPageBtn = self.dialogCardCanvas.transform:Find("翻页按钮")
+            if nextPageBtn then
+                self:AddClickEventListener(nextPageBtn.gameObject, function()
+                    self:OnDialogCardBackgroundClick()
+                end)
+                g_Log("@@trigger [对话触发器] 成功初始化翻页按钮点击事件")
+            else
+                g_LogError("@@trigger [对话触发器] 未找到翻页按钮")
+            end
+
             g_Log("@@trigger [对话触发器] 成功找到对话卡画布")
         else
             g_LogError("@@trigger [对话触发器] 未找到对话卡画布")
@@ -156,47 +192,60 @@ function FsyncElement:Tick()
     if not self.selfAvatar then
         return
     end
+
     -- 获取玩家位置
     local playerPos = self.avatarGameObject.transform.position
-    -- 更新任务气泡朝向
-    if self.taskBubble then
-        -- 获取当前的欧拉角
-        local currentRotation = self.taskBubble.transform.eulerAngles
-        -- 计算朝向玩家的角度
-        local direction = playerPos - self.taskBubble.transform.position
-        local targetRotation = CS.UnityEngine.Quaternion.LookRotation(direction)
-        local targetEulerY = targetRotation.eulerAngles.y
-        -- 只更新Y轴旋转
-        self.taskBubble.transform.eulerAngles = CS.UnityEngine.Vector3(currentRotation.x, targetEulerY, currentRotation.z)
+
+    -- 更新所有NPC的任务气泡朝向
+    for i, npc in ipairs(self.npcs) do
+        if npc.taskBubble then
+            -- 获取当前的欧拉角
+            local currentRotation = npc.taskBubble.transform.eulerAngles
+            -- 计算朝向玩家的角度
+            local direction = playerPos - npc.taskBubble.transform.position
+            local targetRotation = CS.UnityEngine.Quaternion.LookRotation(direction)
+            local targetEulerY = targetRotation.eulerAngles.y
+            -- 只更新Y轴旋转
+            npc.taskBubble.transform.eulerAngles = NextMath.Vector3(currentRotation.x, targetEulerY, currentRotation.z)
+        end
     end
 
     -- 检查与每个NPC的距离
-    self.distance = math.huge  -- 初始化为最大值
+    self.distance = math.huge -- 初始化为最大值
+    local closestNpcIndex = nil
+
+    -- 遍历所有NPC计算距离
     for i, npc in ipairs(self.npcs) do
-        if npc and npc.transform and npc.transform.position then
+        if npc.gameObject and npc.gameObject.transform and npc.gameObject.transform.position then
             -- 确保所有参数都有效再进行距离计算
-            local distance = Vector3.Distance(playerPos, npc.transform.position)
+            local distance = NextMath.DistanceSqrt(playerPos, npc.gameObject.transform.position)
             -- 确保distance不为nil再进行比较
             if distance and type(distance) == "number" then
-                self.distance = math.min(self.distance, distance)
-                -- g_Log(string.format("@@trigger [对话触发器] NPC_%d 距离: %.2f, 最小距离: %.2f", i, distance, self.distance))
+                if distance < self.distance then
+                    self.distance = distance
+                    closestNpcIndex = i
+                end
             end
         end
     end
-    
+
+    -- 记录最近的NPC索引，用于对话内容显示
+    if closestNpcIndex then
+        self.currentNpcIndex = closestNpcIndex
+    end
+
     -- 更新是否在范围内的状态
     local newInRange = self.distance and self.distance <= self.dialogDistance
-    
+
     -- 只在状态发生改变时更新UI和输出日志
     if newInRange ~= self.isInRange then
         self.isInRange = newInRange
-        
+
         if self.btnCanvas then
             self.btnCanvas.gameObject:SetActive(self.isInRange)
-            if self.isInRange then
-                g_Log(string.format("@@trigger [对话触发器] 进入对话范围，显示按钮，距离: %.2f", self.distance))
-            else
-                g_Log(string.format("@@trigger [对话触发器] 离开对话范围，隐藏按钮，恢复移动控制，距离: %.2f", self.distance or 0))
+
+            if self.isInRange and self.currentNpcIndex then
+                g_Log(string.format("@@trigger [对话触发器] 进入NPC%d的对话范围", self.currentNpcIndex))
             end
         end
     end
@@ -210,11 +259,11 @@ function FsyncElement:ReceiveMessage(key, value, isResume)
     -- TODO:
 end
 
--- 发送KEY-VALUE 消息 
+-- 发送KEY-VALUE 消息
 -- @param key 自定义/协议key
 -- @param body  table 消息体
 function FsyncElement:SendCustomMessage(key, body)
-    self:SendMessage(key,body)
+    self:SendMessage(key, body)
 end
 
 -- avatar对象创建完成，包含他人和自己
@@ -228,25 +277,29 @@ end
 function FsyncElement:LogicMapIsAsyncRecorver()
     return false
 end
+
 --开始恢复方法（断线重连的时候用）
 function FsyncElement:LogicMapStartRecover()
     FsyncElement.super:LogicMapStartRecover()
     --TODO
 end
+
 --结束恢复方法 (断线重连的时候用)
 function FsyncElement:LogicMapEndRecover()
     FsyncElement.super:LogicMapEndRecover(self)
     --TODO
 end
+
 --所有的组件恢复完成
 function FsyncElement:LogicMapAllComponentRecoverComplete()
 end
 
 --收到Trigger事件
-function FsyncElement : OnReceiveTriggerEvent(interfaceId)
+function FsyncElement:OnReceiveTriggerEvent(interfaceId)
 end
+
 --收到GetData事件
-function FsyncElement : OnReceiveGetDataEvent(interfaceId)
+function FsyncElement:OnReceiveGetDataEvent(interfaceId)
     return nil
 end
 
@@ -259,13 +312,44 @@ end
 
 -- 对话卡背景点击处理
 function FsyncElement:OnDialogCardBackgroundClick()
-    g_Log("@@trigger [对话触发器] 点击对话卡背景，关闭对话卡")
-    
+    -- 检查是否有当前NPC数据
+    if not self.currentNpcIndex or not self.npcs[self.currentNpcIndex] then
+        g_LogError("@@trigger [对话触发器] 未找到当前NPC数据")
+        return
+    end
+
+    local npcData = self.npcs[self.currentNpcIndex]
+
+    -- 检查是否有对话数据
+    if not npcData.dialogJson or not npcData.dialogJson.dialogs then
+        g_LogError("@@trigger [对话触发器] 未找到对话数据")
+        self:CloseDialogCard()
+        return
+    end
+
+    -- 检查是否还有下一句对话
+    if self.currentDialogIndex < #npcData.dialogJson.dialogs then
+        -- 更新到下一句对话
+        self.currentDialogIndex = self.currentDialogIndex + 1
+        g_Log(string.format("@@trigger [对话触发器] 显示下一句对话 %d/%d",
+            self.currentDialogIndex, #npcData.dialogJson.dialogs))
+
+        -- 更新对话内容
+        self:UpdateDialogContent()
+    else
+        -- 已经是最后一句，关闭对话卡
+        g_Log("@@trigger [对话触发器] 已显示全部对话，关闭对话卡")
+        self:CloseDialogCard()
+    end
+end
+
+-- 关闭对话卡的方法（提取为单独函数以便复用）
+function FsyncElement:CloseDialogCard()
     -- 隐藏对话卡
     if self.dialogCardCanvas then
         self.dialogCardCanvas.gameObject:SetActive(false)
     end
-    
+
     -- 显示对话按钮
     if self.btnCanvas then
         self.btnCanvas.gameObject:SetActive(true)
@@ -273,7 +357,6 @@ function FsyncElement:OnDialogCardBackgroundClick()
 
     -- 启用移动控制
     self.joystickService:SetJoyStickInteractable(true)
-    g_Log("@@trigger [对话触发器] 启用移动控制")
 end
 
 -- 对话按钮点击处理
@@ -281,23 +364,84 @@ function FsyncElement:OnDialogButtonClick()
     if self.dialogCardCanvas then
         -- 显示对话卡
         self.dialogCardCanvas.gameObject:SetActive(true)
-        -- 隐藏任务气泡
-        self.taskBubble.gameObject:SetActive(false)
+
+        -- 隐藏当前NPC的任务气泡
+        if self.currentNpcIndex and self.npcs[self.currentNpcIndex] and self.npcs[self.currentNpcIndex].taskBubble then
+            self.npcs[self.currentNpcIndex].taskBubble.gameObject:SetActive(false)
+        end
+
         -- 隐藏对话按钮
         if self.btnCanvas then
             self.btnCanvas.gameObject:SetActive(false)
         end
+
         -- 禁用移动控制
         self.joystickService:SetJoyStickInteractable(false)
-        g_Log("@@trigger [对话触发器] 显示对话卡，禁用移动控制")
-        
-        -- 发送对话更新事件
+
+        -- 重置对话索引为第一句
+        self.currentDialogIndex = 1
+
+        -- 更新对话内容，使用当前最近的NPC
         self:UpdateDialogContent()
     else
         g_LogError("@@trigger [对话触发器] 对话卡画布未初始化")
     end
 end
 
-return FsyncElement
- 
+-- 更新对话内容
+function FsyncElement:UpdateDialogContent()
+    g_Log("@@trigger [对话触发器] 更新对话内容")
+    if not self.currentNpcIndex or not self.npcs[self.currentNpcIndex] then
+        g_LogError("@@trigger [对话触发器] 未找到当前NPC数据")
+        return
+    end
 
+    local npcData = self.npcs[self.currentNpcIndex]
+    g_Log("@@trigger [对话触发器] 当前NPCid:" .. self.currentNpcIndex)
+    -- 查找对话卡中的相关UI元素
+    local npcImage = self.dialogCardCanvas.transform:Find("dialog_avatar")
+    local npcNameText = self.dialogCardCanvas.transform:Find("dialog_name")
+    local dialogText = self.dialogCardCanvas.transform:Find("dialog_text")
+    -- 更新NPC半身像
+    if npcImage and npcData.avatar then
+        local image = npcImage:GetComponent(typeof(CS.UnityEngine.UI.Image))
+        if image then
+            image.sprite = npcData.avatar
+        end
+    end
+
+    -- 更新NPC名称和对话内容
+    if npcNameText then
+        local nameText = npcNameText:GetComponent(typeof(CS.UnityEngine.UI.Text))
+        if nameText then
+            -- 使用配置的名称
+            nameText.text = npcData.name
+        end
+    end
+
+    -- 更新对话内容
+    if dialogText then
+        local contentText = dialogText:GetComponent(typeof(CS.TMPro.TextMeshProUGUI))
+        if contentText and npcData.dialogJson and npcData.dialogJson.dialogs and
+            self.currentDialogIndex <= #npcData.dialogJson.dialogs then
+            local dialog = npcData.dialogJson.dialogs[self.currentDialogIndex]
+            local content = dialog.content or ""
+            local translation = dialog.translation or ""
+
+            -- 组合内容，使用换行符分隔
+            if content ~= "" and translation ~= "" then
+                contentText.text = content .. "\n" .. translation
+            end
+
+            g_Log(string.format("@@trigger [对话触发器] 设置对话内容(%d/%d): %s",
+                self.currentDialogIndex, #npcData.dialogJson.dialogs, contentText.text))
+        else
+            contentText.text = "..."
+            g_LogError("@@trigger [对话触发器] 未找到有效的对话内容")
+        end
+    end
+
+    g_Log(string.format("@@trigger [对话触发器] 已更新NPC%d的对话内容", self.currentNpcIndex))
+end
+
+return FsyncElement

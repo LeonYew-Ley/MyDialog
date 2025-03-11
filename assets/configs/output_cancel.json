@@ -1,0 +1,599 @@
+{
+    "PROP": {
+        "PET_PK": [
+            "ON_OFF"
+        ],
+        "SWIM_UI": [
+            "UI"
+        ],
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ],
+        "PET_PVE_BATANO": [
+            "ON_OFF"
+        ],
+        "LEARN_FRIEND": [
+            "UI"
+        ]
+    },
+    "FLY": {
+        "PET_PK": [
+            "ON_OFF"
+        ],
+        "SIT": [
+            "ON_OFF"
+        ],
+        "TOP_UI": [
+            "ON_OFF"
+        ],
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ]
+    },
+    "PET_PK": {
+        "FLY": [
+            "ON_OFF"
+        ],
+        "TOP_UI": [
+            "ON_OFF"
+        ],
+        "PARENTAL_CONTROL": [
+            "UI"
+        ],
+        "NPC_ANSWER_QUESTION_TRIGGER": [
+            "ON_OFF"
+        ],
+        "GAME": [
+            "ON_OFF"
+        ],
+        "PET_PVE_BATANO": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ],
+        "SPRINGFESTIVAL_ACTIVITY": [
+            "UI"
+        ],
+        "SKATEBOARD": [
+            "UI"
+        ],
+        "TIPAIPAI": [
+            "UI"
+        ]
+    },
+    "PET_RECEIVE_PK": {
+        "PROP": [
+            "ON_OFF"
+        ],
+        "FLY": [
+            "ON_OFF"
+        ],
+        "NPC_TALK": [
+            "ON_OFF"
+        ],
+        "NPC_CATCH_AVATAR": [
+            "ON_OFF"
+        ],
+        "TOP_UI": [
+            "UI",
+            "ON_OFF"
+        ],
+        "PARENTAL_CONTROL": [
+            "UI"
+        ],
+        "COMPLAINTS": [
+            "UI"
+        ],
+        "DAILY_TASK": [
+            "UI"
+        ],
+        "STUDY": [
+            "UI"
+        ],
+        "KNOWLEDGE": [
+            "UI"
+        ],
+        "PROP_HAND": [
+            "ON_OFF"
+        ],
+        "RANK": [
+            "ON_OFF"
+        ],
+        "PET_PANEL": [
+            "ON_OFF"
+        ],
+        "DRESS": [
+            "UI"
+        ],
+        "DRIVE": [
+            "ON_OFF"
+        ],
+        "LEFT_TOP": [
+            "UI"
+        ],
+        "LOTTERY": [
+            "ON_OFF"
+        ],
+        "SWIM_UI": [
+            "UI"
+        ],
+        "NPC_ANSWER_QUESTION_TRIGGER": [
+            "ON_OFF"
+        ],
+        "BROWSE_SCENE": [
+            "UI"
+        ],
+        "GUIDE_TASK": [
+            "ON_OFF"
+        ],
+        "UPDATE_ONLINE_STATUS": [
+            "ON_OFF"
+        ],
+        "NOOBIE_TASK": [
+            "UI"
+        ],
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ],
+        "GAME": [
+            "UI",
+            "ON_OFF"
+        ],
+        "CAMP": [
+            "ON_OFF"
+        ],
+        "WORLD_BOSS": [
+            "UI"
+        ],
+        "WORD_BOOS_POP_WINDOS": [
+            "UI"
+        ],
+        "LEARN_FRIEND": [
+            "UI"
+        ],
+        "SPRINGFESTIVAL_ACTIVITY": [
+            "UI"
+        ],
+        "SKATEBOARD": [
+            "UI"
+        ],
+        "TIPAIPAI": [
+            "UI"
+        ]
+    },
+    "NPC_TALK": {
+        "PROP_HAND": [
+            "ON_OFF"
+        ],
+        "PET_PVE_BATANO": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ]
+    },
+    "NPC_CATCH_AVATAR": {
+        "TOP_UI": [
+            "UI",
+            "ON_OFF"
+        ],
+        "DAILY_TASK": [
+            "UI"
+        ],
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ],
+        "PET_PVE_BATANO": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ],
+        "LEARN_FRIEND": [
+            "UI"
+        ]
+    },
+    "SIT": {
+        "FLY": [
+            "ON_OFF"
+        ],
+        "PET_PK": [
+            "ON_OFF"
+        ],
+        "NPC_TALK": [
+            "ON_OFF"
+        ],
+        "TOP_UI": [
+            "ON_OFF"
+        ],
+        "PROP_HAND": [
+            "ON_OFF"
+        ],
+        "DRIVE": [
+            "ON_OFF"
+        ],
+        "FISHING": [
+            "ON_OFF"
+        ],
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ],
+        "GAME": [
+            "ON_OFF"
+        ],
+        "PET_PVE_BATANO": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ],
+        "SKATEBOARD": [
+            "UI"
+        ]
+    },
+    "TOP_UI": {},
+    "CHAT": {},
+    "PARENTAL_CONTROL": {},
+    "COMPLAINTS": {},
+    "DAILY_TASK": {},
+    "STUDY": {
+        "PROP": [
+            "ON_OFF"
+        ],
+        "NPC_CATCH_AVATAR": [
+            "ON_OFF"
+        ],
+        "NPC_ANSWER_QUESTION_TRIGGER": [
+            "ON_OFF"
+        ],
+        "PET_PVE_BATANO": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ],
+        "CAMP": [
+            "ON_OFF"
+        ]
+    },
+    "HEAD": {},
+    "KNOWLEDGE": {},
+    "PROP_HAND": {
+        "PROP_HAND": [
+            "ON_OFF"
+        ]
+    },
+    "RANK": {},
+    "PET_PANEL": {},
+    "DRESS": {},
+    "TRAINING_CAMP": {},
+    "GUIDE": {
+        "TOP_UI": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ],
+        "SKATEBOARD": [
+            "UI"
+        ]
+    },
+    "DRIVE": {
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ]
+    },
+    "LEFT_TOP": {},
+    "LOTTERY": {},
+    "PLAY_SLIDES": {
+        "PET_PK": [
+            "ON_OFF"
+        ],
+        "TOP_UI": [
+            "ON_OFF"
+        ],
+        "DAILY_TASK": [
+            "UI"
+        ],
+        "STUDY": [
+            "UI"
+        ],
+        "PROP_HAND": [
+            "ON_OFF"
+        ],
+        "DRIVE": [
+            "ON_OFF"
+        ],
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ],
+        "PET_PVE_BATANO": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ]
+    },
+    "SWIM": {
+        "PET_PK": [
+            "ON_OFF"
+        ],
+        "PROP_HAND": [
+            "ON_OFF"
+        ],
+        "DRIVE": [
+            "ON_OFF"
+        ],
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ]
+    },
+    "PLAY_SLIDES_ANSWER": {
+        "PROP_HAND": [
+            "ON_OFF"
+        ],
+        "DRIVE": [
+            "ON_OFF"
+        ],
+        "PET_PVE_BATANO": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ]
+    },
+    "SWIM_UI": {
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ],
+        "CAMP": [
+            "UI"
+        ]
+    },
+    "NPC_ANSWER_QUESTION_TRIGGER": {},
+    "BROWSE_SCENE": {},
+    "NEWBIE_OPERATE_GUIDE": {
+        "TOP_UI": [
+            "UI",
+            "ON_OFF"
+        ],
+        "GAME": [
+            "UI",
+            "ON_OFF"
+        ],
+        "PET_PVE_BATANO": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ]
+    },
+    "GUIDE_TASK": {},
+    "UPDATE_ONLINE_STATUS": {},
+    "NOOBIE_TASK": {},
+    "FISHING": {
+        "NPC_TALK": [
+            "ON_OFF"
+        ],
+        "NPC_CATCH_AVATAR": [
+            "ON_OFF"
+        ],
+        "SIT": [
+            "ON_OFF"
+        ],
+        "TOP_UI": [
+            "UI",
+            "ON_OFF"
+        ],
+        "PARENTAL_CONTROL": [
+            "UI"
+        ],
+        "COMPLAINTS": [
+            "UI"
+        ],
+        "DAILY_TASK": [
+            "UI"
+        ],
+        "STUDY": [
+            "UI"
+        ],
+        "KNOWLEDGE": [
+            "UI"
+        ],
+        "PROP_HAND": [
+            "ON_OFF"
+        ],
+        "DRESS": [
+            "ON_OFF"
+        ],
+        "DRIVE": [
+            "ON_OFF"
+        ],
+        "LEFT_TOP": [
+            "UI"
+        ],
+        "LOTTERY": [
+            "ON_OFF"
+        ],
+        "SWIM_UI": [
+            "UI"
+        ],
+        "NPC_ANSWER_QUESTION_TRIGGER": [
+            "ON_OFF"
+        ],
+        "BROWSE_SCENE": [
+            "UI"
+        ],
+        "GUIDE_TASK": [
+            "ON_OFF"
+        ],
+        "UPDATE_ONLINE_STATUS": [
+            "ON_OFF"
+        ],
+        "NOOBIE_TASK": [
+            "UI"
+        ],
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ],
+        "GAME": [
+            "UI",
+            "ON_OFF"
+        ],
+        "CAMP": [
+            "ON_OFF"
+        ],
+        "WORD_BOOS_POP_WINDOS": [
+            "UI"
+        ],
+        "LEARN_FRIEND": [
+            "UI"
+        ]
+    },
+    "LIFT_AVATAR": {
+        "PROP_HAND": [
+            "ON_OFF"
+        ],
+        "CAMP": [
+            "ON_OFF"
+        ]
+    },
+    "LIFTED_AVATAR": {},
+    "GAME": {
+        "PROP": [
+            "ON_OFF"
+        ],
+        "SIT": [
+            "ON_OFF"
+        ],
+        "TOP_UI": [
+            "ON_OFF"
+        ],
+        "DAILY_TASK": [
+            "UI"
+        ],
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ],
+        "CAMP": [
+            "ON_OFF"
+        ],
+        "LEARN_FRIEND": [
+            "UI"
+        ],
+        "SPRINGFESTIVAL_ACTIVITY": [
+            "UI"
+        ],
+        "TIPAIPAI": [
+            "UI"
+        ]
+    },
+    "PET_PVE_BATANO": {
+        "PET_PK": [
+            "ON_OFF"
+        ],
+        "PET_PVE_BATANO": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ]
+    },
+    "PET_PVE_STEP_ON_RAY": {
+        "PET_PK": [
+            "ON_OFF"
+        ],
+        "CAMP": [
+            "ON_OFF"
+        ]
+    },
+    "CAMP": {
+        "FLY": [
+            "ON_OFF"
+        ],
+        "SWIM_UI": [
+            "UI"
+        ],
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ],
+        "PET_PVE_BATANO": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ],
+        "LEARN_FRIEND": [
+            "UI"
+        ]
+    },
+    "WORLD_BOSS": {
+        "PET_PK": [
+            "ON_OFF"
+        ],
+        "GAME": [
+            "UI",
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ]
+    },
+    "WORD_BOOS_POP_WINDOS": {},
+    "LEARN_FRIEND": {
+        "PET_PVE_BATANO": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ],
+        "CAMP": [
+            "UI"
+        ]
+    },
+    "SPRINGFESTIVAL_ACTIVITY": {
+        "PET_PK": [
+            "ON_OFF"
+        ],
+        "PET_RECEIVE_PK": [
+            "ON_OFF"
+        ],
+        "UPDATE_ONLINE_STATUS": [
+            "ON_OFF"
+        ],
+        "PET_PVE_STEP_ON_RAY": [
+            "ON_OFF"
+        ]
+    },
+    "SKATEBOARD": {
+        "PET_PK": [
+            "ON_OFF"
+        ],
+        "PET_RECEIVE_PK": [
+            "ON_OFF"
+        ],
+        "SIT": [
+            "ON_OFF"
+        ],
+        "PROP_HAND": [
+            "ON_OFF"
+        ],
+        "DRIVE": [
+            "ON_OFF"
+        ],
+        "GUIDE_TASK": [
+            "ON_OFF"
+        ],
+        "LIFT_AVATAR": [
+            "ON_OFF"
+        ],
+        "WORLD_BOSS": [
+            "UI"
+        ]
+    },
+    "TIPAIPAI": {}
+}

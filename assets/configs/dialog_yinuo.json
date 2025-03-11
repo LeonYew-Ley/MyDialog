@@ -1,0 +1,19 @@
+{
+  "dialogs": [
+    {
+      "content": "Hello,this is Yinuo!",
+      "translation": "你好，我叫一诺！",
+      "nextId": 2
+    },
+    {
+      "content": "Let's speak English!",
+      "translation": "让我们说英文！",
+      "nextId": 0
+    },
+    {
+      "content": "This is third dialog!",
+      "translation": "这是第三段对话！",
+      "nextId": 0
+    }
+  ]
+}

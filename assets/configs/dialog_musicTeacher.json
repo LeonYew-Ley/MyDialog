@@ -1,0 +1,14 @@
+{
+  "dialogs": [
+    {
+      "content": "Hello,I'm your music teacher!",
+      "translation": "我是你的音乐老师！",
+      "nextId": 2
+    },
+    {
+      "content": "Let's make some music!",
+      "translation": "让我们一起制作音乐！",
+      "nextId": 0
+    }
+  ]
+}
