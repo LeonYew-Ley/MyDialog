@@ -249,6 +249,16 @@ function FsyncElement:InitSceneObjects()
 
                     -- 保存按钮引用以便后续使用
                     self.practiceButton = assetBtn.gameObject
+
+                    -- 获取并存储Animator组件
+                    local animator = assetBtn.gameObject:GetComponent(typeof(CS.UnityEngine.Animator))
+                    if animator then
+                        self.practiceButton.animator = animator
+                        g_Log("@@trigger [对话触发器] 成功获取练习按钮Animator组件")
+                    else
+                        g_LogError("@@trigger [对话触发器] 练习按钮没有Animator组件")
+                    end
+
                     g_Log("@@trigger [对话触发器] 成功添加练习按钮到对话卡")
                 else
                     g_LogError("@@trigger [对话触发器] 未找到练习按钮Asset")
