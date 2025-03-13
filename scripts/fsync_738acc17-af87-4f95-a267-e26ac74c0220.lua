@@ -30,13 +30,15 @@ function FsyncElement:initialize(worldElement)
     self.isInRange = false
     self.distance = math.huge
     self.taskBubble = nil
-    self.dialogCardCanvas = nil -- 对话卡的屏幕画布
-    self.currentDialogIndex = 1 -- 当前显示的对话索引
-    self.currentAudioSource = nil
-    self.isAudioPlaying = false -- 音频播放状态跟踪
-    self.isAudioPaused = false  -- 新增：音频暂停状态跟踪
+    self.dialogCardCanvas = nil   -- 对话卡的屏幕画布
+    self.currentDialogIndex = 1   -- 当前显示的对话索引
+    self.currentAudioSource = nil -- 当前音频源组件
+    self.isAudioPlaying = false   -- 音频播放状态跟踪
+    self.isAudioPaused = false    -- 音频暂停状态跟踪
     self.practiceButtonAnimator = nil
-
+    self.audioLength = 0          -- 当前音频长度
+    self.audioStartTime = 0       -- 音频开始播放时间
+    self.audioGO = nil            -- 音频游戏对象
 
     -- 订阅KEY消息
     self:SubscribeMsgKey(Fsync_Example_KEY)
@@ -278,6 +280,26 @@ function FsyncElement:InitSceneObjects()
     else
         g_LogError("@@trigger [对话触发器] 未找到对话卡")
     end
+
+    -- 创建音频对象和组件
+    self:InitAudioSource()
+end
+
+-- 初始化音频源
+function FsyncElement:InitAudioSource()
+    -- 创建一个专用的音频游戏对象
+    self.audioGO = GameObject("DialogAudioSource")
+    -- 设置为不销毁
+    GameObject.DontDestroyOnLoad(self.audioGO)
+    -- 添加音频源组件
+    self.currentAudioSource = self.audioGO:AddComponent(typeof(CS.UnityEngine.AudioSource))
+    -- 设置基本属性
+    self.currentAudioSource.playOnAwake = false
+    self.currentAudioSource.loop = false
+    -- 初始音量
+    self.currentAudioSource.volume = 1.0
+
+    g_Log("@@trigger [对话触发器] 音频源初始化完成")
 end
 
 -- 每帧检测距离
@@ -343,6 +365,14 @@ function FsyncElement:Tick()
             end
         end
     end
+
+    -- 检测音频是否播放完成
+    if self.isAudioPlaying and not self.isAudioPaused and self.currentAudioSource then
+        if not self.currentAudioSource.isPlaying then
+            -- 音频播放完成
+            self:OnAudioPlayComplete()
+        end
+    end
 end
 
 -- 收到/恢复IRC消息
@@ -405,8 +435,13 @@ function FsyncElement:Exit()
 
     -- 停止正在播放的音频
     if self.currentAudioSource then
-        self.audioService:StopAudioClip(self.currentAudioSource)
-        self.currentAudioSource = nil
+        self.currentAudioSource:Stop()
+    end
+
+    -- 销毁音频游戏对象
+    if self.audioGO then
+        GameObject.Destroy(self.audioGO)
+        self.audioGO = nil
     end
 
     FsyncElement.super.Exit(self)
@@ -414,12 +449,6 @@ end
 
 -- 对话卡背景点击处理
 function FsyncElement:OnDialogCardBackgroundClick()
-    -- 如果音频正在播放，不允许继续操作
-    if self.isAudioPlaying then
-        g_Log("@@trigger [对话触发器] 音频播放中，请等待播放完成...")
-        return
-    end
-
     -- 检查是否有当前NPC数据
     if not self.currentNpcIndex or not self.npcs[self.currentNpcIndex] then
         g_LogError("@@trigger [对话触发器] 未找到当前NPC数据")
@@ -427,6 +456,31 @@ function FsyncElement:OnDialogCardBackgroundClick()
     end
 
     local npcData = self.npcs[self.currentNpcIndex]
+
+    -- 如果音频正在播放且是第一次播放，不允许继续操作
+    if self.isAudioPlaying and npcData.isFirstPlay then
+        g_Log("@@trigger [对话触发器] 首次音频播放中，请等待播放完成...")
+        return
+    end
+
+    -- 如果音频正在播放且不是第一次播放，停止当前音频
+    if self.isAudioPlaying and not npcData.isFirstPlay then
+        g_Log("@@trigger [对话触发器] 中断当前音频播放，进入下一句对话")
+        -- 停止当前音频
+        if self.currentAudioSource then
+            self.currentAudioSource:Stop()
+            -- 重置音频状态
+            self.isAudioPlaying = false
+            self.isAudioPaused = false
+
+            -- 重置按钮状态
+            if self.practiceButtonAnimator then
+                self.practiceButtonAnimator:ResetTrigger("play")
+                self.practiceButtonAnimator:ResetTrigger("forbid")
+                self.practiceButtonAnimator:ResetTrigger("active")
+            end
+        end
+    end
 
     -- 检查是否有对话数据
     if not npcData.dialogJson or not npcData.dialogJson.dialogs then
@@ -466,9 +520,6 @@ function FsyncElement:CloseDialogCard()
 
     -- 启用移动控制
     self.joystickService:SetJoyStickInteractable(true)
-
-    -- 关闭第一次对话
-    -- self.npcs[self.currentNpcIndex].isFirstPlay = false
 end
 
 -- 对话按钮点击处理
@@ -559,6 +610,27 @@ function FsyncElement:UpdateDialogContent()
     g_Log(string.format("@@trigger [对话触发器] 已更新NPC%d的对话内容", self.currentNpcIndex))
 end
 
+-- 音频播放完成处理
+function FsyncElement:OnAudioPlayComplete()
+    g_Log("@@trigger [对话触发器] 音频播放完成")
+
+    -- 更新状态
+    self.isAudioPlaying = false
+    self.isAudioPaused = false
+
+    -- 重置按钮状态
+    if self.practiceButtonAnimator then
+        self.practiceButtonAnimator:ResetTrigger("forbid")
+        self.practiceButtonAnimator:ResetTrigger("play")
+        self.practiceButtonAnimator:SetTrigger("active")
+    end
+
+    -- 更新NPC状态
+    if self.currentNpcIndex and self.npcs[self.currentNpcIndex] then
+        self.npcs[self.currentNpcIndex].isFirstPlay = false
+    end
+end
+
 -- 播放对话音频
 function FsyncElement:PlayAudio(index)
     g_Log(string.format("@@trigger [对话触发器] 尝试播放对话音频 %d", index))
@@ -577,16 +649,24 @@ function FsyncElement:PlayAudio(index)
     end
 
     -- 如果有正在播放的音频，先停止
-    if self.currentAudioSource then
-        self.audioService:StopAudioClip(self.currentAudioSource)
-        self.currentAudioSource = nil
+    if self.currentAudioSource and self.currentAudioSource.isPlaying then
+        self.currentAudioSource:Stop()
     end
 
     -- 获取音频剪辑
     local audioClip = npcData.audios[index]
     if audioClip then
-        -- 设置正在播放标志
+        -- 设置音频剪辑
+        self.currentAudioSource.clip = audioClip
+        -- 设置音量和音调
+        self.currentAudioSource.volume = 1.0
+        self.currentAudioSource.pitch = 1.0
+        -- 开始播放
+        self.currentAudioSource:Play()
+
+        -- 更新状态
         self.isAudioPlaying = true
+        self.isAudioPaused = false
 
         if npcData.isFirstPlay then
             self.practiceButtonAnimator:SetTrigger("forbid")
@@ -595,19 +675,6 @@ function FsyncElement:PlayAudio(index)
             self.practiceButtonAnimator:ResetTrigger("active")
             self.practiceButtonAnimator:SetTrigger("play")
         end
-
-        self.currentAudioSource = self.audioService:PlayClipOneShot(audioClip, function()
-            g_Log("@@trigger [对话触发器] 音频播放完成")
-
-            self.currentAudioSource = nil
-
-            -- 重置播放状态
-            self.isAudioPlaying = false
-            self.practiceButtonAnimator:ResetTrigger("forbid")
-            self.practiceButtonAnimator:ResetTrigger("play")
-            self.practiceButtonAnimator:SetTrigger("active")
-            npcData.isFirstPlay = false
-        end, 1.0, 1.0) -- 音量和音调参数
 
         g_Log(string.format("@@trigger [对话触发器] 开始播放对话音频 NPC:%d, 对话索引:%d", self.currentNpcIndex, index))
     else
@@ -627,46 +694,46 @@ function FsyncElement:OnPracticeButtonClick()
         return
     end
 
-    -- 如果没有当前播放的音频，则开始播放
-    if not self.currentAudioSource then
-        -- 重新播放当前对话的音频，用于练习
+    -- 如果音频源不存在或未设置剪辑，则开始播放
+    if not self.currentAudioSource or not self.currentAudioSource.clip then
         self:PlayAudio(self.currentDialogIndex)
+        return
+    end
+
+    -- 切换暂停/播放状态
+    if self.isAudioPlaying and not self.isAudioPaused then
+        -- 当前正在播放，需要暂停
+        g_Log("@@trigger [对话触发器] 暂停音频播放")
+
+        self.currentAudioSource:Pause()
+        self.isAudioPaused = true
+
+        -- 更新按钮动画状态为active
+        if self.practiceButtonAnimator then
+            self.practiceButtonAnimator:ResetTrigger("play")
+            self.practiceButtonAnimator:ResetTrigger("forbid")
+            self.practiceButtonAnimator:SetTrigger("active")
+        end
     else
-        -- 切换暂停/播放状态
-        if self.isAudioPlaying then
-            -- 当前正在播放，需要暂停
-            g_Log("@@trigger [对话触发器] 暂停音频播放")
+        -- 当前已暂停或未播放，需要播放或恢复
+        g_Log("@@trigger [对话触发器] 开始/恢复音频播放")
 
-            -- 暂停音频
-            if self.currentAudioSource then
-                self.currentAudioSource:Pause()
-                self.isAudioPlaying = false
-                self.isAudioPaused = true
-
-                -- 更新按钮动画状态为active
-                if self.practiceButtonAnimator then
-                    self.practiceButtonAnimator:ResetTrigger("play")
-                    self.practiceButtonAnimator:ResetTrigger("forbid")
-                    self.practiceButtonAnimator:SetTrigger("active")
-                end
-            end
+        if self.isAudioPaused then
+            -- 恢复已暂停的音频
+            self.currentAudioSource:UnPause()
         else
-            -- 当前已暂停，需要恢复播放
-            g_Log("@@trigger [对话触发器] 恢复音频播放")
+            -- 开始新的播放
+            self.currentAudioSource:Play()
+        end
 
-            -- 恢复音频播放
-            if self.currentAudioSource and self.isAudioPaused then
-                self.currentAudioSource:Play()
-                self.isAudioPlaying = true
-                self.isAudioPaused = false
+        self.isAudioPlaying = true
+        self.isAudioPaused = false
 
-                -- 更新按钮动画状态为播放中
-                if self.practiceButtonAnimator then
-                    self.practiceButtonAnimator:ResetTrigger("active")
-                    self.practiceButtonAnimator:ResetTrigger("forbid")
-                    self.practiceButtonAnimator:SetTrigger("play")
-                end
-            end
+        -- 更新按钮动画状态为播放中
+        if self.practiceButtonAnimator then
+            self.practiceButtonAnimator:ResetTrigger("active")
+            self.practiceButtonAnimator:ResetTrigger("forbid")
+            self.practiceButtonAnimator:SetTrigger("play")
         end
     end
 end
