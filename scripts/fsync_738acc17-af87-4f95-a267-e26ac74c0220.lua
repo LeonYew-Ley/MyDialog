@@ -34,6 +34,7 @@ function FsyncElement:initialize(worldElement)
     self.currentDialogIndex = 1 -- 当前显示的对话索引
     self.currentAudioSource = nil
     self.isAudioPlaying = false -- 新增：音频播放状态跟踪
+    self.practiceButtonAnimator = nil
 
     -- 订阅KEY消息
     self:SubscribeMsgKey(Fsync_Example_KEY)
@@ -95,8 +96,9 @@ function FsyncElement:InitSceneObjects()
                 dialogJson = nil,
                 taskBubble = nil,
                 name = configHandler:GetStringByConfigKey("npcName") or "unknown",
-                dialogs = {}, -- 新增dialogs变量，存储对话内容
-                audios = {}   -- 为每个NPC添加音频数组
+                dialogs = {},      -- 新增dialogs变量，存储对话内容
+                audios = {},       -- 为每个NPC添加音频数组
+                isFirstPlay = true -- 新增：是否是第一次播放音频
             }
 
             -- 查找任务气泡
@@ -253,7 +255,7 @@ function FsyncElement:InitSceneObjects()
                     -- 获取并存储Animator组件
                     local animator = assetBtn.gameObject:GetComponent(typeof(CS.UnityEngine.Animator))
                     if animator then
-                        self.practiceButton.animator = animator
+                        self.practiceButtonAnimator = animator
                         g_Log("@@trigger [对话触发器] 成功获取练习按钮Animator组件")
                     else
                         g_LogError("@@trigger [对话触发器] 练习按钮没有Animator组件")
