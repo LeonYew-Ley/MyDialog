@@ -33,8 +33,10 @@ function FsyncElement:initialize(worldElement)
     self.dialogCardCanvas = nil -- 对话卡的屏幕画布
     self.currentDialogIndex = 1 -- 当前显示的对话索引
     self.currentAudioSource = nil
-    self.isAudioPlaying = false -- 新增：音频播放状态跟踪
+    self.isAudioPlaying = false -- 音频播放状态跟踪
+    self.isAudioPaused = false  -- 新增：音频暂停状态跟踪
     self.practiceButtonAnimator = nil
+
 
     -- 订阅KEY消息
     self:SubscribeMsgKey(Fsync_Example_KEY)
@@ -436,6 +438,7 @@ function FsyncElement:OnDialogCardBackgroundClick()
     -- 检查是否还有下一句对话
     if self.currentDialogIndex < #npcData.dialogJson.dialogs then
         -- 更新到下一句对话
+        self.npcs[self.currentNpcIndex].isFirstPlay = false
         self.currentDialogIndex = self.currentDialogIndex + 1
         g_Log(string.format("@@trigger [对话触发器] 显示下一句对话 %d/%d",
             self.currentDialogIndex, #npcData.dialogJson.dialogs))
@@ -444,8 +447,8 @@ function FsyncElement:OnDialogCardBackgroundClick()
         self:UpdateDialogContent()
     else
         -- 已经是最后一句，关闭对话卡
-        g_Log("@@trigger [对话触发器] 已显示全部对话，关闭对话卡")
         self:CloseDialogCard()
+        g_Log("@@trigger [对话触发器] 已显示全部对话，关闭对话卡")
     end
 end
 
@@ -463,6 +466,9 @@ function FsyncElement:CloseDialogCard()
 
     -- 启用移动控制
     self.joystickService:SetJoyStickInteractable(true)
+
+    -- 关闭第一次对话
+    -- self.npcs[self.currentNpcIndex].isFirstPlay = false
 end
 
 -- 对话按钮点击处理
@@ -501,9 +507,8 @@ function FsyncElement:UpdateDialogContent()
         g_LogError("@@trigger [对话触发器] 未找到当前NPC数据")
         return
     end
-
     local npcData = self.npcs[self.currentNpcIndex]
-
+    npcData.isFirstPlay = true
     -- 查找对话卡中的相关UI元素
     local npcImage = self.dialogCardCanvas.transform:Find("dialog_avatar")
     local npcNameText = self.dialogCardCanvas.transform:Find("dialog_name")
@@ -583,30 +588,25 @@ function FsyncElement:PlayAudio(index)
         -- 设置正在播放标志
         self.isAudioPlaying = true
 
-        -- 如果练习按钮存在，设置为禁用状态
-        if self.practiceButton then
-            -- 禁用练习按钮
-            local button = self.practiceButton:GetComponent(typeof(CS.UnityEngine.UI.Button))
-            if button then
-                button.interactable = false
-            end
+        if npcData.isFirstPlay then
+            self.practiceButtonAnimator:SetTrigger("forbid")
+        else
+            self.practiceButtonAnimator:ResetTrigger("forbid")
+            self.practiceButtonAnimator:ResetTrigger("active")
+            self.practiceButtonAnimator:SetTrigger("play")
         end
 
-        -- 使用audioService播放音频剪辑
         self.currentAudioSource = self.audioService:PlayClipOneShot(audioClip, function()
             g_Log("@@trigger [对话触发器] 音频播放完成")
+
             self.currentAudioSource = nil
 
             -- 重置播放状态
             self.isAudioPlaying = false
-
-            -- 如果练习按钮存在，恢复可交互状态
-            if self.practiceButton then
-                local button = self.practiceButton:GetComponent(typeof(CS.UnityEngine.UI.Button))
-                if button then
-                    button.interactable = true
-                end
-            end
+            self.practiceButtonAnimator:ResetTrigger("forbid")
+            self.practiceButtonAnimator:ResetTrigger("play")
+            self.practiceButtonAnimator:SetTrigger("active")
+            npcData.isFirstPlay = false
         end, 1.0, 1.0) -- 音量和音调参数
 
         g_Log(string.format("@@trigger [对话触发器] 开始播放对话音频 NPC:%d, 对话索引:%d", self.currentNpcIndex, index))
@@ -619,22 +619,56 @@ end
 function FsyncElement:OnPracticeButtonClick()
     g_Log("@@trigger [对话触发器] 练习按钮被点击")
 
-    -- 如果音频正在播放，不允许继续操作
-    if self.isAudioPlaying then
-        g_Log("@@trigger [对话触发器] 音频播放中，请等待播放完成...")
-        return
-    end
-
-    -- 检查是否有当前NPC数据和对话
-    if not self.currentNpcIndex or not self.npcs[self.currentNpcIndex] then
-        g_LogError("@@trigger [对话触发器] 未找到当前NPC数据")
-        return
-    end
-
     local npcData = self.npcs[self.currentNpcIndex]
 
-    -- 重新播放当前对话的音频，用于练习
-    self:PlayAudio(self.currentDialogIndex)
+    -- 如果是第一次播放，直接返回，不执行任何操作
+    if npcData.isFirstPlay then
+        g_Log("@@trigger [对话触发器] 首次播放中，练习按钮不可用")
+        return
+    end
+
+    -- 如果没有当前播放的音频，则开始播放
+    if not self.currentAudioSource then
+        -- 重新播放当前对话的音频，用于练习
+        self:PlayAudio(self.currentDialogIndex)
+    else
+        -- 切换暂停/播放状态
+        if self.isAudioPlaying then
+            -- 当前正在播放，需要暂停
+            g_Log("@@trigger [对话触发器] 暂停音频播放")
+
+            -- 暂停音频
+            if self.currentAudioSource then
+                self.currentAudioSource:Pause()
+                self.isAudioPlaying = false
+                self.isAudioPaused = true
+
+                -- 更新按钮动画状态为active
+                if self.practiceButtonAnimator then
+                    self.practiceButtonAnimator:ResetTrigger("play")
+                    self.practiceButtonAnimator:ResetTrigger("forbid")
+                    self.practiceButtonAnimator:SetTrigger("active")
+                end
+            end
+        else
+            -- 当前已暂停，需要恢复播放
+            g_Log("@@trigger [对话触发器] 恢复音频播放")
+
+            -- 恢复音频播放
+            if self.currentAudioSource and self.isAudioPaused then
+                self.currentAudioSource:Play()
+                self.isAudioPlaying = true
+                self.isAudioPaused = false
+
+                -- 更新按钮动画状态为播放中
+                if self.practiceButtonAnimator then
+                    self.practiceButtonAnimator:ResetTrigger("active")
+                    self.practiceButtonAnimator:ResetTrigger("forbid")
+                    self.practiceButtonAnimator:SetTrigger("play")
+                end
+            end
+        end
+    end
 end
 
 return FsyncElement
