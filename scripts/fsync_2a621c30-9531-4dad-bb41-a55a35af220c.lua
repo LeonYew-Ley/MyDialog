@@ -18,30 +18,6 @@ local Fsync_Example_KEY = "_Example__Key_"
 function FsyncElement:initialize(worldElement)
     FsyncElement.super.initialize(self, worldElement)
 
-    -- 解析配置，获取音频列表
-    -- self:JsonParseConfig()
-
-    -- 初始化音频列表数组
-    self.audios = {}
-
-    -- 获取配置中的音频列表
-    local audioList = self.configHandler:GetListSubConfigHandler("audioList")
-    if audioList then
-        for i, subConfigHandler in ipairs(audioList) do
-            local audioClip = subConfigHandler:GetAudioByConfigKey("audioFile")
-            if audioClip then
-                table.insert(self.audios, audioClip)
-            end
-        end
-    end
-
-    g_Log("@@card [对话卡] 加载音频列表完成，共加载 " .. #self.audios .. " 个音频文件")
-
-    -- 使用fire函数发送self.audios数组
-    local audioEventKey = "DIALOG_CARD_AUDIOS_LOADED"
-    self:Fire(audioEventKey, self.audios)
-    g_Log("@@card [对话卡] 已发送音频列表事件: " .. audioEventKey)
-
     --订阅KEY消息
     self:SubscribeMsgKey(Fsync_Example_KEY)
 end

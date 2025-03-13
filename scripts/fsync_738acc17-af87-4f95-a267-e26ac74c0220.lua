@@ -32,34 +32,11 @@ function FsyncElement:initialize(worldElement)
     self.taskBubble = nil
     self.dialogCardCanvas = nil -- 对话卡的屏幕画布
     self.currentDialogIndex = 1 -- 当前显示的对话索引
-    self.audios = {}            -- 存储音频文件
-
+    self.currentAudioSource = nil
+    self.isAudioPlaying = false -- 新增：音频播放状态跟踪
 
     -- 订阅KEY消息
     self:SubscribeMsgKey(Fsync_Example_KEY)
-
-    -- 监听音频加载完成事件
-    self:WatchAudioLoadedEvent()
-end
-
--- 监听音频加载完成事件
-function FsyncElement:WatchAudioLoadedEvent()
-    local audioEventKey = "DIALOG_CARD_AUDIOS_LOADED"
-
-    self.observerService:Watch(audioEventKey,
-        function(eventName, audioData)
-            if audioData and type(audioData) == "table" then
-                self.audios = audioData[0]
-                g_Log(string.format("@@trigger [对话触发器] 接收到音频数据，共 %d 个音频文件", #self.audios))
-
-                -- 音频数据接收后的处理逻辑
-                self:OnAudiosReceived()
-            else
-                g_LogError("@@trigger [对话触发器] 接收到的音频数据无效")
-            end
-        end)
-
-    g_Log("@@trigger [对话触发器] 已监听音频加载完成事件")
 end
 
 -- 音频数据接收后的处理逻辑
@@ -118,7 +95,8 @@ function FsyncElement:InitSceneObjects()
                 dialogJson = nil,
                 taskBubble = nil,
                 name = configHandler:GetStringByConfigKey("npcName") or "unknown",
-                dialogs = {} -- 新增dialogs变量，存储对话内容
+                dialogs = {}, -- 新增dialogs变量，存储对话内容
+                audios = {}   -- 为每个NPC添加音频数组
             }
 
             -- 查找任务气泡
@@ -143,6 +121,33 @@ function FsyncElement:InitSceneObjects()
                     if dialogJson.dialogs and type(dialogJson.dialogs) == "table" then
                         npcData.dialogs = dialogJson.dialogs
                         g_Log(string.format("@@trigger [对话触发器] NPC%d成功加载%d条对话", i, #dialogJson.dialogs))
+                        -- 加载每句对话的音频
+                        for j, dialog in ipairs(npcData.dialogs) do
+                            if dialog.url and dialog.url ~= "" then
+                                -- 使用正确的URL加载方式
+                                g_Log(string.format("@@trigger [对话触发器] 开始加载对话音频URL: %s", dialog.url))
+                                -- 捕获当前的j值，避免闭包问题
+                                local currentIndex = j
+                                -- 使用AudioService加载远程URL音频
+                                self.audioService:GetMp3AudioFromGetUrl(
+                                    dialog.url,
+                                    function(error)
+                                        -- 加载失败回调
+                                        g_LogError(string.format("@@trigger [对话触发器] 对话音频加载失败，索引: %d, 错误: %s",
+                                            currentIndex, tostring(error)))
+                                    end,
+                                    function(audioClip)
+                                        -- 加载成功回调
+                                        if audioClip then
+                                            npcData.audios[currentIndex] = audioClip
+                                            g_Log(string.format("@@trigger [对话触发器] 对话音频加载成功, 索引: %d", currentIndex))
+                                        else
+                                            g_LogError(string.format("@@trigger [对话触发器] 获取到空的音频资源, 索引: %d", currentIndex))
+                                        end
+                                    end
+                                )
+                            end
+                        end
                     else
                         g_LogError(string.format("@@trigger [对话触发器] NPC%d的对话文件格式不正确", i))
                     end
@@ -215,6 +220,41 @@ function FsyncElement:InitSceneObjects()
                 g_Log("@@trigger [对话触发器] 成功初始化翻页按钮点击事件")
             else
                 g_LogError("@@trigger [对话触发器] 未找到翻页按钮")
+            end
+
+            -- 查找UI物体并获取练习按钮
+            local uiObject = GameObject.Find("UI")
+            if uiObject then
+                local assetBtn = uiObject.transform:Find("Ley_PracticeAudioBtn/Asset")
+                if assetBtn then
+                    -- 直接使用Asset按钮，改变其父级
+                    assetBtn.transform:SetParent(self.dialogCardCanvas, false)
+
+                    -- 设置按钮位置
+                    local rectTransform = assetBtn:GetComponent(typeof(CS.UnityEngine.RectTransform))
+                    if rectTransform then
+                        -- 设置锚点为底部中心
+                        rectTransform.anchorMin = CS.UnityEngine.Vector2(0.5, 0)
+                        rectTransform.anchorMax = CS.UnityEngine.Vector2(0.5, 0)
+                        -- 设置位置
+                        rectTransform.anchoredPosition = CS.UnityEngine.Vector2(-166.48, 280.66)
+                        -- 强制刷新布局
+                        CS.UnityEngine.UI.LayoutRebuilder.ForceRebuildLayoutImmediate(rectTransform)
+                    end
+
+                    -- 为练习按钮添加点击事件
+                    self:AddClickEventListener(assetBtn.gameObject, function()
+                        self:OnPracticeButtonClick()
+                    end)
+
+                    -- 保存按钮引用以便后续使用
+                    self.practiceButton = assetBtn.gameObject
+                    g_Log("@@trigger [对话触发器] 成功添加练习按钮到对话卡")
+                else
+                    g_LogError("@@trigger [对话触发器] 未找到练习按钮Asset")
+                end
+            else
+                g_LogError("@@trigger [对话触发器] 未找到UI物体")
             end
 
             g_Log("@@trigger [对话触发器] 成功找到对话卡画布")
@@ -347,11 +387,25 @@ end
 
 -- 脚本释放
 function FsyncElement:Exit()
+    g_Log("@@trigger [对话触发器] 退出")
+
+    -- 停止正在播放的音频
+    if self.currentAudioSource then
+        self.audioService:StopAudioClip(self.currentAudioSource)
+        self.currentAudioSource = nil
+    end
+
     FsyncElement.super.Exit(self)
 end
 
 -- 对话卡背景点击处理
 function FsyncElement:OnDialogCardBackgroundClick()
+    -- 如果音频正在播放，不允许继续操作
+    if self.isAudioPlaying then
+        g_Log("@@trigger [对话触发器] 音频播放中，请等待播放完成...")
+        return
+    end
+
     -- 检查是否有当前NPC数据
     if not self.currentNpcIndex or not self.npcs[self.currentNpcIndex] then
         g_LogError("@@trigger [对话触发器] 未找到当前NPC数据")
@@ -488,28 +542,87 @@ function FsyncElement:UpdateDialogContent()
     g_Log(string.format("@@trigger [对话触发器] 已更新NPC%d的对话内容", self.currentNpcIndex))
 end
 
--- 播放指定索引的音频
+-- 播放对话音频
 function FsyncElement:PlayAudio(index)
-    if not self.audios or #self.audios == 0 then
-        g_LogError("@@trigger [对话触发器] 没有可播放的音频")
+    g_Log(string.format("@@trigger [对话触发器] 尝试播放对话音频 %d", index))
+
+    if not self.currentNpcIndex or not self.npcs[self.currentNpcIndex] then
+        g_LogError("@@trigger [对话触发器] 未找到当前NPC数据")
         return
     end
 
-    if index < 1 or index > #self.audios then
-        g_LogError(string.format("@@trigger [对话触发器] 音频索引 %d 超出范围 (1-%d)",
-            index, #self.audios))
+    local npcData = self.npcs[self.currentNpcIndex]
+
+    -- 检查音频是否存在
+    if not npcData.audios or not npcData.audios[index] then
+        g_LogError(string.format("@@trigger [对话触发器] 没有可播放的音频 NPC:%d, 对话索引:%d", self.currentNpcIndex, index))
         return
     end
 
-    local audioData = self.audios[index]
-    g_Log("@@trigger [对话触发器] type(audioData): " .. type(audioData))
-    if audioData then
-        self.audioService:PlayClipOneShot(audioData, function()
-            g_Log(string.format("@@trigger [对话触发器] 音频 %d 播放完成", index))
-        end)
+    -- 如果有正在播放的音频，先停止
+    if self.currentAudioSource then
+        self.audioService:StopAudioClip(self.currentAudioSource)
+        self.currentAudioSource = nil
+    end
+
+    -- 获取音频剪辑
+    local audioClip = npcData.audios[index]
+    if audioClip then
+        -- 设置正在播放标志
+        self.isAudioPlaying = true
+
+        -- 如果练习按钮存在，设置为禁用状态
+        if self.practiceButton then
+            -- 禁用练习按钮
+            local button = self.practiceButton:GetComponent(typeof(CS.UnityEngine.UI.Button))
+            if button then
+                button.interactable = false
+            end
+        end
+
+        -- 使用audioService播放音频剪辑
+        self.currentAudioSource = self.audioService:PlayClipOneShot(audioClip, function()
+            g_Log("@@trigger [对话触发器] 音频播放完成")
+            self.currentAudioSource = nil
+
+            -- 重置播放状态
+            self.isAudioPlaying = false
+
+            -- 如果练习按钮存在，恢复可交互状态
+            if self.practiceButton then
+                local button = self.practiceButton:GetComponent(typeof(CS.UnityEngine.UI.Button))
+                if button then
+                    button.interactable = true
+                end
+            end
+        end, 1.0, 1.0) -- 音量和音调参数
+
+        g_Log(string.format("@@trigger [对话触发器] 开始播放对话音频 NPC:%d, 对话索引:%d", self.currentNpcIndex, index))
     else
-        g_LogError(string.format("@@trigger [对话触发器] 音频 %d 无效", index))
+        g_LogError(string.format("@@trigger [对话触发器] 音频剪辑无效 NPC:%d, 对话索引:%d", self.currentNpcIndex, index))
     end
+end
+
+-- 练习按钮点击处理
+function FsyncElement:OnPracticeButtonClick()
+    g_Log("@@trigger [对话触发器] 练习按钮被点击")
+
+    -- 如果音频正在播放，不允许继续操作
+    if self.isAudioPlaying then
+        g_Log("@@trigger [对话触发器] 音频播放中，请等待播放完成...")
+        return
+    end
+
+    -- 检查是否有当前NPC数据和对话
+    if not self.currentNpcIndex or not self.npcs[self.currentNpcIndex] then
+        g_LogError("@@trigger [对话触发器] 未找到当前NPC数据")
+        return
+    end
+
+    local npcData = self.npcs[self.currentNpcIndex]
+
+    -- 重新播放当前对话的音频，用于练习
+    self:PlayAudio(self.currentDialogIndex)
 end
 
 return FsyncElement

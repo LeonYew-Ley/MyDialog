@@ -2,20 +2,20 @@
   "dialogs": [
     {
       "content": "Hello,this is Yinuo!",
-      "uaddress": "979361741682591/assets/audios/c0vyd016sww67215jzxi.mp3",
+      "url": "https://static0.xesimg.com/next-studio-pub/app/1741688424190/wdODWspL4D0RKeM8QXVy.mp3",
       "translation": "你好，我叫一诺！",
       "nextId": 2
     },
     {
       "content": "Let's speak English!",
       "translation": "让我们说英文！",
-      "uaddress": "979381741682591/assets/audios/co6eryr583tld2xmtbp2.mp3",
+      "url": "https://static0.xesimg.com/next-studio-pub/app/1741688424165/xMTM40QyepYsyK9abySk.mp3",
       "nextId": 0
     },
     {
       "content": "This is third dialog!",
       "translation": "这是第三段对话！",
-      "uaddress": "979371741682591/assets/audios/c57l8hztwyefpdssitm0.mp3",
+      "url": "https://static0.xesimg.com/next-studio-pub/app/1741688424189/ZQHyLiVLhLqpOObgdOLO.mp3",
       "nextId": 0
     }
   ]

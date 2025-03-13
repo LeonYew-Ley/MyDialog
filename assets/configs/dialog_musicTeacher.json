@@ -2,13 +2,13 @@
   "dialogs": [
     {
       "content": "Hello,I'm your music teacher!",
-      "audioPath": "979361741682591/assets/audios/c0vyd016sww67215jzxi.mp3",
+      "url": "https://static0.xesimg.com/next-studio-pub/app/1741689606868/SAklSj9Yl70eIhv4r5zt.mp3",
       "translation": "我是你的音乐老师！",
       "nextId": 2
     },
     {
       "content": "Let's make some music!",
-      "audioPath": "979381741682591/assets/audios/co6eryr583tld2xmtbp2.mp3",
+      "url": "https://static0.xesimg.com/next-studio-pub/app/1741753339660/RgbBcIopcwomWcqCnECT.mp3",
       "translation": "让我们一起制作音乐！",
       "nextId": 0
     }
